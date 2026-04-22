@@ -117,24 +117,50 @@ if disp_file and inv_file:
         gbp_cols = [col for col in final_data.columns if 'gbp' in col]
         final_data[gbp_cols] = final_data[gbp_cols].round(2)
 
-        # --- Section: Executive KPI Header ---
-        m1, m2, m3, m4 = st.columns(4)
-        
-        current_income = final_data['net_income_gbp'].sum()
-        current_procurement = final_data['acquisition_cost_gbp'].sum()
+        # Re-establish required global variables for the historical trend chart
         current_margin = final_data['margin_gbp'].sum()
+        current_income = final_data['net_income_gbp'].sum()
         current_leakage = final_data.get('maverick_leakage_gbp', pd.Series([0])).sum()
-        total_savings = final_data.get('potential_savings_gbp', pd.Series([0])).sum()
-        margin_pct = (current_margin / current_income * 100) if current_income > 0 else 0
 
-        m1.metric("Net Total Income", f"£{current_income:,.2f}")
-        m2.metric("Total Procurement", f"£{current_procurement:,.2f}")
-        m3.metric("Practice Margin", f"£{current_margin:,.2f}", delta=f"{margin_pct:.1f}%")
-        m4.metric("Switch Opportunity", f"£{total_savings:,.2f}", delta="Actionable", delta_color="inverse")
+        # --- Section: Executive KPI Header ---
+        REALISATION_FACTOR = 0.85
+        MONTHS_IN_YEAR = 12
+
+        monthly_opp = final_data.get('opportunity_gbp', pd.Series([0])).sum()
+        annual_run_rate = monthly_opp * MONTHS_IN_YEAR
+        realised_annual_projection = annual_run_rate * REALISATION_FACTOR
+
+        st.subheader("Financial Impact Projection")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                label="Monthly Identified Opportunity",
+                value=f"£{monthly_opp:,.2f}",
+                help="The total theoretical saving identified in this specific data upload."
+            )
+
+        with col2:
+            st.metric(
+                label="Projected Annualised Savings",
+                value=f"£{realised_annual_projection:,.2f}",
+                help=f"Calculated as (Monthly Saving x 12) at an {REALISATION_FACTOR*100:.0f}% implementation rate."
+            )
+
+        with col3:
+            st.metric(
+                label="Full Potential (100% Implementation)",
+                value=f"£{annual_run_rate:,.2f}",
+                delta=f"£{annual_run_rate - realised_annual_projection:,.2f} variance",
+                delta_color="normal",
+                help="The maximum possible annual saving if every single suggestion is implemented."
+            )
+
+        st.caption(f"**Note on Methodology:** Annual projections are based on a linear run-rate of the current month's data. An {REALISATION_FACTOR*100:.0f}% realisation factor has been applied to account for clinical nuances and patient preferences.")
 
         st.divider()
 
- # --- Section: Historical Trend ---
+        # --- Section: Historical Trend ---
         st.subheader("Performance Trend")
         historical_df = fetch_mock_historical_data(current_margin, current_income, current_leakage)
         
@@ -149,11 +175,9 @@ if disp_file and inv_file:
             }
         )
         
-        # Smooth the lines and add a subtle fill for a modern commercial aesthetic
         fig_trend.update_traces(line_shape='spline', fill='tozeroy')
-        
         fig_trend.update_layout(
-            height=280, # Restricts vertical height to prevent screen hogging
+            height=280, 
             plot_bgcolor='rgba(0,0,0,0)',
             paper_bgcolor='rgba(0,0,0,0)',
             xaxis_title="",
@@ -162,13 +186,11 @@ if disp_file and inv_file:
             legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5),
             margin=dict(l=0, r=0, t=20, b=0)
         )
-        
         fig_trend.update_yaxes(showgrid=True, gridcolor='rgba(0,0,0,0.05)', tickprefix="£")
         fig_trend.update_xaxes(showgrid=False)
-        
         st.plotly_chart(fig_trend, use_container_width=True, config={'displayModeBar': False})
 
-# --- Section: Visual Insights ---
+        # --- Section: Visual Insights ---
         st.subheader("Top Profit & Loss Drivers")
         fig1 = px.bar(
             final_data.sort_values('margin_gbp').head(10), 
@@ -226,7 +248,7 @@ if disp_file and inv_file:
 
         st.divider()
 
- # --- Section: Verified Audit Trail & Clinical Grouping ---
+        # --- Section: Verified Audit Trail & Clinical Grouping ---
         st.subheader("Performance & Switch Analysis")
         
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -243,7 +265,6 @@ if disp_file and inv_file:
                 if not switch_df.empty:
                     st.write("**Financial Summary**")
                     
-                    # 1. High-Level Financial Table
                     summary_cols = ['example_drug_description', 'suggested_drug', 'switch_type', 'potential_savings_gbp']
                     st.dataframe(
                         switch_df[summary_cols].sort_values('potential_savings_gbp', ascending=False),
@@ -260,7 +281,6 @@ if disp_file and inv_file:
                     st.write("<br>", unsafe_allow_html=True)
                     st.write("**Clinical Evidence & Rationale**")
                     
-                    # 2. Expandable Clinical Deep-Dive
                     for index, row in switch_df.sort_values('potential_savings_gbp', ascending=False).iterrows():
                         current_drug = row['example_drug_description']
                         new_drug = row['suggested_drug']
