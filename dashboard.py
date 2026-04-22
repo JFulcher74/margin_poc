@@ -196,28 +196,39 @@ if disp_file and inv_file:
         fig_trend.update_xaxes(showgrid=False)
         st.plotly_chart(fig_trend, use_container_width=True, config={'displayModeBar': False})
 
-        # --- Section: Visual Insights ---
-        st.subheader("Top Profit & Loss Drivers")
-        fig1 = px.bar(
-            final_data.sort_values('margin_gbp').head(10), 
-            x='margin_gbp', 
-            y='example_drug_description',
-            color='margin_gbp', 
-            color_continuous_scale=['#d9534f', '#f9f9f9', '#5cb85c'],
-            orientation='h'
-        )
-        fig1.update_layout(
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            xaxis_title="",
-            yaxis_title="",
-            showlegend=False,
-            coloraxis_showscale=False,
-            margin=dict(l=0, r=0, t=0, b=20)
-        )
-        fig1.update_xaxes(showgrid=False, zeroline=True, zerolinecolor='lightgrey', tickprefix="£")
-        fig1.update_yaxes(showgrid=False)
-        st.plotly_chart(fig1, use_container_width=True, config={'displayModeBar': False})
+# --- Section: Bleeding Margin (Loss-Makers) ---
+        st.subheader("Critical Margin Alerts (Loss-Making Dispensing)")
+        
+        loss_makers = final_data[final_data['margin_gbp'] < 0].copy()
+        
+        if not loss_makers.empty:
+            st.error(f"⚠️ {len(loss_makers)} product lines are currently dispensing at a net loss.")
+            
+            display_cols = [
+                'example_drug_description', 
+                'total_quantity_packs', 
+                'net_income_gbp', 
+                'acquisition_cost_gbp', 
+                'margin_gbp'
+            ]
+            
+            st.dataframe(
+                loss_makers[display_cols].sort_values('margin_gbp', ascending=True)
+                .style.background_gradient(subset=['margin_gbp'], cmap='Reds_r')
+                .format(precision=2),
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "example_drug_description": "Product",
+                    "total_quantity_packs": "Packs Dispensed",
+                    "net_income_gbp": "NHS Reimbursed (£)",
+                    "acquisition_cost_gbp": "Actual Spend (£)",
+                    "margin_gbp": "Net Loss (£)"
+                }
+            )
+            st.caption("Investigate these lines immediately. Check for missing NHS Part VIIIA concessions, excessive wholesaler pricing, or generic alternatives.")
+        else:
+            st.success("No loss-making items detected in the current dispensing period.")
 
         st.divider()
 
