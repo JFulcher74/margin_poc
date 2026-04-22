@@ -126,7 +126,11 @@ if disp_file and inv_file:
         REALISATION_FACTOR = 0.85
         MONTHS_IN_YEAR = 12
 
-        monthly_opp = final_data.get('opportunity_gbp', pd.Series([0])).sum()
+        monthly_opp = (
+            final_data.get('potential_savings_gbp', pd.Series([0])).sum() +
+            final_data.get('maverick_leakage_gbp', pd.Series([0])).sum() +
+            final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
+)
         annual_run_rate = monthly_opp * MONTHS_IN_YEAR
         realised_annual_projection = annual_run_rate * REALISATION_FACTOR
 
