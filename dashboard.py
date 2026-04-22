@@ -6,9 +6,8 @@ from src.normalise import normalise_dispensing, normalise_invoices, normalise_ta
 from src.match import match_records
 from src.calc import calculate_metrics
 
-# --- Mock Database Function ---
+# Mock Database Function
 def fetch_mock_historical_data(current_margin, current_opportunity):
-    """Simulates a database query returning the last 3 months of aggregate performance."""
     history = []
     
     history.append({
@@ -32,7 +31,7 @@ def fetch_mock_historical_data(current_margin, current_opportunity):
     df_history = pd.DataFrame(history)
     return df_history
 
-# --- Page Configuration & Styling ---
+# Page Configuration & Styling
 st.set_page_config(page_title="MarginGuard AI | Practice Analytics", layout="wide", page_icon="🏦")
 
 st.markdown("""
@@ -45,7 +44,7 @@ st.markdown("""
 st.title("🏦 MarginGuard AI")
 st.caption("Commercial Intelligence for Dispensing GP Practices")
 
-# --- Sidebar: Data Ingestion ---
+# Sidebar: Data Ingestion
 with st.sidebar:
     st.header("Input Data")
     disp_file = st.file_uploader("Monthly Dispensing Export", type="csv")
@@ -60,14 +59,13 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
-    # --- 1. Initialise & Process Master Data ---
+    # 1. Initialise & Process Master Data
     if 'master_data' not in st.session_state:
         with st.spinner("Calculating NHS Reimbursement & Leakage..."):
             disp_df = pd.read_csv(disp_file, dtype={'dm_d_code': str})
             inv_df = pd.read_csv(inv_file, dtype={'dm_d_code': str})
             tariff_raw = pd.read_csv("Part VIIIA April 2026.csv", dtype=str)
             
-            # If the header isn't found, it means the NHS title rows are present, so we skip them
             if 'VMPP Snomed Code' not in tariff_raw.columns:
                 tariff_raw = pd.read_csv("Part VIIIA April 2026.csv", skiprows=2, dtype=str)
             dnd_df = pd.read_csv("dnd_mock.csv", dtype={'dm_d_code': str})
@@ -77,13 +75,13 @@ if disp_file and inv_file:
 
     df = st.session_state.master_data.copy()
 
-    # --- 2. Data Segregation ---
+    # 2. Data Segregation
     incomplete_mask = (df['acquisition_cost_gbp'] == 0.0) | (df['acquisition_cost_gbp'].isna())
     incomplete_data = df[incomplete_mask].copy()
 
     st.divider()
 
-    # --- 3. Action Required: Missing Data ---
+    # 3. Action Required: Missing Data
     if not incomplete_data.empty:
         st.subheader("⚠️ Action Required: Missing Invoice Data")
         st.write("The following lines lack an acquisition cost. Please enter the missing costs below to instantly update your P&L.")
@@ -109,22 +107,20 @@ if disp_file and inv_file:
             
             st.rerun()
 
-    # --- 4. Process Final Data ---
+    # 4. Process Final Data
     final_data = st.session_state.master_data[st.session_state.master_data['acquisition_cost_gbp'] > 0.0].copy()
 
     if not final_data.empty:
         gbp_cols = [col for col in final_data.columns if 'gbp' in col]
         final_data[gbp_cols] = final_data[gbp_cols].round(2)
 
-        # Global variables for the historical trend chart
         current_margin = final_data['margin_gbp'].sum()
         current_income = final_data['net_income_gbp'].sum()
 
-        # --- Section: Executive KPI Header ---
+        # Executive KPI Header
         REALISATION_FACTOR = 0.85
         MONTHS_IN_YEAR = 12
 
-        # Aggregate total opportunity accurately
         monthly_opp = (
             final_data.get('potential_savings_gbp', pd.Series([0])).sum() +
             final_data.get('maverick_leakage_gbp', pd.Series([0])).sum() +
@@ -164,7 +160,7 @@ if disp_file and inv_file:
 
         st.divider()
 
-        # --- Section: Historical Trend ---
+        # Historical Trend
         st.subheader("Margin Trajectory & Total Potential")
         
         current_opportunity = monthly_opp
@@ -196,98 +192,46 @@ if disp_file and inv_file:
         fig_trend.update_xaxes(showgrid=False)
         st.plotly_chart(fig_trend, use_container_width=True, config={'displayModeBar': False})
 
-# --- Section: Bleeding Margin (Loss-Makers) ---
-        st.subheader("Critical Margin Alerts (Loss-Making Dispensing)")
-        
-        loss_makers = final_data[final_data['margin_gbp'] < 0].copy()
-        
-        if not loss_makers.empty:
-            st.error(f"⚠️ {len(loss_makers)} product lines are currently dispensing at a net loss.")
-            
-            display_cols = [
-                'example_drug_description', 
-                'total_quantity_packs', 
-                'net_income_gbp', 
-                'acquisition_cost_gbp', 
-                'margin_gbp'
-            ]
-            
-            st.dataframe(
-                loss_makers[display_cols].sort_values('margin_gbp', ascending=True)
-                .style.background_gradient(subset=['margin_gbp'], cmap='Reds_r')
-                .format(precision=2),
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "example_drug_description": "Product",
-                    "total_quantity_packs": "Packs Dispensed",
-                    "net_income_gbp": "NHS Reimbursed (£)",
-                    "acquisition_cost_gbp": "Actual Spend (£)",
-                    "margin_gbp": "Net Loss (£)"
-                }
-            )
-            st.caption("Investigate these lines immediately. Check for missing NHS Part VIIIA concessions, excessive wholesaler pricing, or generic alternatives.")
-        else:
-            st.success("No loss-making items detected in the current dispensing period.")
-
         st.divider()
 
-        st.subheader("High-Impact Clinical Proposals")
-        if 'potential_savings_gbp' in final_data.columns:
-            switch_opportunities = final_data[final_data['potential_savings_gbp'] > 0]
-            top_switches = switch_opportunities.sort_values(by='potential_savings_gbp', ascending=False).head(3)
-            
-            if not top_switches.empty:
-                for index, row in top_switches.iterrows():
-                    with st.container(border=True):
-                        c1, c2 = st.columns([1, 2])
-                        with c1:
-                            st.metric(
-                                label=f"Switch: {row['example_drug_description']}", 
-                                value=f"£{row['potential_savings_gbp']:,.2f}",
-                                delta=row['switch_type'],
-                                delta_color="normal"
-                            )
-                        with c2:
-                            st.markdown(f"**Target:** {row['suggested_drug']}")
-                            st.markdown(f"**Implementation:** {row.get('clinical_effort', 'Uncategorised')}")
-                            st.markdown(f"**Evidence:** {row.get('clinical_rationale', 'Rationale unavailable.')}")
-                            
-                            link = row.get('clinical_link', '')
-                            source = row.get('reference_source', 'Unknown')
-                            if pd.notna(link) and link != '' and link != '#':
-                                st.caption(f"Source: [{source}]({link})")
-                            else:
-                                st.caption(f"Source: {source}")
-                                
-                            if mds_active and row.get('mds_warning', False):
-                                st.warning("MDS Alert: Ensure this brand-to-generic switch does not negatively impact your primary manufacturer rebate thresholds before proceeding.")
-            else:
-                st.info("No immediate switch opportunities identified in this dataset.")
-        else:
-            st.info("Switch opportunity logic has not been processed.")
-            
-        st.caption("*Note: Financial projections represent gross dispensing margin. Practices must factor in local clinical administration time when reviewing 'Tier 2' switches.*")
-
-        st.divider()
-
-        # --- Section: Verified Audit Trail & Clinical Grouping ---
-        st.subheader("Performance & Switch Analysis")
+        # Operational Action Board
+        st.subheader("Operational Action Board")
         
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
-            "🔄 Switch Opportunities",
-            "💊 Line-Item Audit",
-            "🔬 Therapeutic Group Analysis", 
-            "🛒 Procurement Leakage",
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🚨 Critical Losses",
+            "🔄 Clinical Switches", 
+            "🛒 Procurement Waste",
             "🛡️ Price Concessions"
         ])
+        
         with tab1:
+            loss_makers = final_data[final_data['margin_gbp'] < 0].copy()
+            if not loss_makers.empty:
+                st.error(f"⚠️ {len(loss_makers)} product lines are currently dispensing at a net loss.")
+                display_cols = ['example_drug_description', 'total_quantity_packs', 'net_income_gbp', 'acquisition_cost_gbp', 'margin_gbp']
+                st.dataframe(
+                    loss_makers[display_cols].sort_values('margin_gbp', ascending=True)
+                    .style.background_gradient(subset=['margin_gbp'], cmap='Reds_r')
+                    .format(precision=2),
+                    use_container_width=True, hide_index=True,
+                    column_config={
+                        "example_drug_description": "Product",
+                        "total_quantity_packs": "Packs Dispensed",
+                        "net_income_gbp": "NHS Reimbursed (£)",
+                        "acquisition_cost_gbp": "Actual Spend (£)",
+                        "margin_gbp": "Net Loss (£)"
+                    }
+                )
+                st.caption("Investigate these lines immediately. Check for missing NHS Part VIIIA concessions, excessive wholesaler pricing, or generic alternatives.")
+            else:
+                st.success("No loss-making items detected in the current dispensing period.")
+
+        with tab2:
             if 'potential_savings_gbp' in final_data.columns:
                 switch_df = final_data[final_data['potential_savings_gbp'] > 0.0].copy()
                 
                 if not switch_df.empty:
                     st.write("**Financial Summary**")
-                    
                     summary_cols = ['example_drug_description', 'suggested_drug', 'switch_type', 'potential_savings_gbp']
                     st.dataframe(
                         switch_df[summary_cols].sort_values('potential_savings_gbp', ascending=False),
@@ -295,20 +239,18 @@ if disp_file and inv_file:
                             "example_drug_description": "Current Drug",
                             "suggested_drug": "Alternative",
                             "switch_type": "Switch Type",
-                            "potential_savings_gbp": st.column_config.NumberColumn("Annual Saving", format="£%.2f")
+                            "potential_savings_gbp": st.column_config.NumberColumn("Est. Monthly Saving", format="£%.2f")
                         },
-                        hide_index=True,
-                        use_container_width=True
+                        hide_index=True, use_container_width=True
                     )
                     
-                    st.write("<br>", unsafe_allow_html=True)
-                    st.write("**Clinical Evidence & Rationale**")
-                    
+                    st.write("<br>**Clinical Evidence & Rationale**", unsafe_allow_html=True)
                     for index, row in switch_df.sort_values('potential_savings_gbp', ascending=False).iterrows():
                         current_drug = row['example_drug_description']
                         new_drug = row['suggested_drug']
                         
                         with st.expander(f"Review Switch: {current_drug} to {new_drug}"):
+                            st.markdown(f"**Implementation:** {row.get('clinical_effort', 'Uncategorised')}")
                             st.markdown(f"**Clinical Justification:** {row.get('clinical_rationale', 'No rationale provided.')}")
                             
                             col1, col2 = st.columns(2)
@@ -322,49 +264,16 @@ if disp_file and inv_file:
                                 else:
                                     st.markdown("**Reference:** Local document (Offline)")
                                     
+                            if mds_active and row.get('mds_warning', False):
+                                st.warning("MDS Alert: Ensure this brand-to-generic switch does not negatively impact your primary manufacturer rebate thresholds before proceeding.")
+                            
                             st.caption("*Clinical Governance Disclaimer: Switch opportunities are algorithmically generated. The prescribing clinician retains ultimate clinical responsibility for assessing patient suitability before initiating any therapeutic or generic switch.*")
                 else:
                     st.success("No immediate switch opportunities identified.")
             else:
                 st.info("Switch opportunity logic has not been processed.")
-        
-        with tab2:
-            display_columns = [
-                'example_drug_description', 'therapeutic_group', 'total_quantity_packs', 
-                'gross_drug_reimbursed_gbp', 'clawback_deduction_gbp', 'net_income_gbp', 
-                'acquisition_cost_gbp', 'margin_gbp'
-            ]
-            available_cols = [col for col in display_columns if col in final_data.columns]
-            st.dataframe(
-                final_data[available_cols].style.background_gradient(subset=['margin_gbp'], cmap='RdYlGn', vmin=-50, vmax=50)
-                .format(precision=2), 
-                use_container_width=True,
-                hide_index=True
-            )
 
         with tab3:
-            if 'therapeutic_group' in final_data.columns:
-                category_df = final_data.groupby('therapeutic_group').agg(
-                    lines_dispensed=('total_quantity_packs', 'sum'),
-                    total_income=('net_income_gbp', 'sum'),
-                    total_cost=('acquisition_cost_gbp', 'sum'),
-                    net_margin=('margin_gbp', 'sum')
-                ).reset_index()
-                
-                category_df['margin_pct'] = (category_df['net_margin'] / category_df['total_income']) * 100
-                category_df['margin_pct'] = category_df['margin_pct'].fillna(0).round(1).astype(str) + '%'
-                category_df = category_df.sort_values('net_margin', ascending=True)
-                
-                st.dataframe(
-                    category_df.style.background_gradient(subset=['net_margin'], cmap='RdYlGn', vmin=-100, vmax=100)
-                    .format({'total_income': '{:.2f}', 'total_cost': '{:.2f}', 'net_margin': '{:.2f}'}),
-                    use_container_width=True,
-                    hide_index=True
-                )
-            else:
-                st.info("Therapeutic group mapping is not yet processed.")
-
-        with tab4:
             if 'maverick_leakage_gbp' in final_data.columns:
                 maverick_df = final_data[final_data['maverick_leakage_gbp'] > 0].copy()
                 
@@ -377,13 +286,12 @@ if disp_file and inv_file:
                         maverick_df[display_cols].sort_values('maverick_leakage_gbp', ascending=False)
                         .style.background_gradient(subset=['maverick_leakage_gbp'], cmap='Oranges')
                         .format(precision=2),
-                        use_container_width=True,
-                        hide_index=True,
+                        use_container_width=True, hide_index=True,
                         column_config={
                             "example_drug_description": "Product",
-                            "acquisition_cost_gbp": "Actual Spend",
+                            "acquisition_cost_gbp": "Actual Spend (£)",
                             "cheapest_supplier": "Cheapest Supplier",
-                            "maverick_leakage_gbp": "Waste (Maverick Buying)"
+                            "maverick_leakage_gbp": "Waste (Maverick Buying) (£)"
                         }
                     )
                 else:
@@ -391,7 +299,7 @@ if disp_file and inv_file:
             else:
                 st.info("Maverick leakage logic has not been processed.")
 
-        with tab5:
+        with tab4:
             if 'concession_uplift_gbp' in final_data.columns:
                 concession_df = final_data[final_data['concession_uplift_gbp'] > 0].copy()
                 
@@ -411,13 +319,12 @@ if disp_file and inv_file:
                         concession_df[display_cols].sort_values('concession_uplift_gbp', ascending=False)
                         .style.background_gradient(subset=['concession_uplift_gbp'], cmap='Blues')
                         .format(precision=2),
-                        use_container_width=True,
-                        hide_index=True,
+                        use_container_width=True, hide_index=True,
                         column_config={
                             "example_drug_description": "Product",
-                            "acquisition_cost_gbp": "Actual Spend",
-                            "margin_gbp": "Final Margin",
-                            "concession_uplift_gbp": "Concession Value Reclaimed"
+                            "acquisition_cost_gbp": "Actual Spend (£)",
+                            "margin_gbp": "Final Margin (£)",
+                            "concession_uplift_gbp": "Concession Value Reclaimed (£)"
                         }
                     )
                 else:
