@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+.DS_Store
+*.csv
+!Part VIIIA April 2026.csv
+!dnd_mock.csv
+!mock_dispensing_100.csv
+!mock_invoices_100.csv

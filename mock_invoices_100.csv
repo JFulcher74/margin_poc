@@ -1,0 +1,23 @@
+invoice_date,dm_d_code,supplier_name,supplier_description,unit_cost_gbp,pack_size
+2026-04-10,8058211000001101,AAH,Lipitor 20mg tablets 28,20.94,28
+2026-04-12,8058211000001101,Alliance,Lipitor 20mg tablets 28,23.41,28
+2026-04-10,11417011000001106,AAH,Nexium 20mg gastro-resistant tablets 28,15.72,28
+2026-04-12,11417011000001106,Alliance,Nexium 20mg gastro-resistant tablets 28,17.57,28
+2026-04-10,17603511000001107,AAH,Omeprazole 20mg gastro-resistant capsules 28,1.02,28
+2026-04-12,17603511000001107,Alliance,Omeprazole 20mg gastro-resistant capsules 28,1.14,28
+2026-04-10,28572511000001104,AAH,Edoxaban 60mg tablets 28,41.65,28
+2026-04-12,28572511000001104,Alliance,Edoxaban 60mg tablets 28,46.55,28
+2026-04-10,9474711000001109,AAH,Atorvastatin 20mg tablets 28,0.83,28
+2026-04-12,9474711000001109,Alliance,Atorvastatin 20mg tablets 28,0.93,28
+2026-04-10,12140411000001101,AAH,Ramipril 5mg capsules 28,0.98,28
+2026-04-12,12140411000001101,Alliance,Ramipril 5mg capsules 28,1.09,28
+2026-04-10,14188111000001100,AAH,Amlodipine 5mg tablets 28,0.75,28
+2026-04-12,14188111000001100,Alliance,Amlodipine 5mg tablets 28,0.84,28
+2026-04-10,13768511000001107,AAH,Lansoprazole 30mg gastro-resistant capsules 28,0.98,28
+2026-04-12,13768511000001107,Alliance,Lansoprazole 30mg gastro-resistant capsules 28,1.09,28
+2026-04-10,15152011000001109,AAH,Sertraline 50mg tablets 28,1.19,28
+2026-04-12,15152011000001109,Alliance,Sertraline 50mg tablets 28,1.33,28
+2026-04-10,31782211000001102,AAH,Metformin 500mg tablets 84,1.83,84
+2026-04-12,31782211000001102,Alliance,Metformin 500mg tablets 84,2.04,84
+2026-04-10,28246311000001109,AAH,Amoxicillin 500mg capsules 21,1.23,21
+2026-04-12,28246311000001109,Alliance,Amoxicillin 500mg capsules 21,1.38,21
