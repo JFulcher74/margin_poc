@@ -31,7 +31,7 @@ def fetch_mock_historical_data(current_margin, current_opportunity):
     
     df_history = pd.DataFrame(history)
     return df_history
-    
+
 # --- Page Configuration & Styling ---
 st.set_page_config(page_title="MarginGuard AI | Practice Analytics", layout="wide", page_icon="🏦")
 
@@ -52,6 +52,8 @@ with st.sidebar:
     inv_file = st.file_uploader("Supplier Invoice Export", type="csv")
     st.divider()
     st.write("Current Tariff: **April 2026**")
+    st.divider()
+    mds_active = st.toggle("MDS / Rebate Schemes Active", value=False, help="Enable this if the practice receives overriding volume discounts from manufacturers.")
 
     if st.button("Reset Dashboard"):
         st.session_state.clear()
@@ -114,20 +116,21 @@ if disp_file and inv_file:
         gbp_cols = [col for col in final_data.columns if 'gbp' in col]
         final_data[gbp_cols] = final_data[gbp_cols].round(2)
 
-        # Re-establish required global variables for the historical trend chart
+        # Global variables for the historical trend chart
         current_margin = final_data['margin_gbp'].sum()
         current_income = final_data['net_income_gbp'].sum()
-        current_leakage = final_data.get('maverick_leakage_gbp', pd.Series([0])).sum()
 
         # --- Section: Executive KPI Header ---
         REALISATION_FACTOR = 0.85
         MONTHS_IN_YEAR = 12
 
+        # Aggregate total opportunity accurately
         monthly_opp = (
             final_data.get('potential_savings_gbp', pd.Series([0])).sum() +
             final_data.get('maverick_leakage_gbp', pd.Series([0])).sum() +
             final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
-)
+        )
+        
         annual_run_rate = monthly_opp * MONTHS_IN_YEAR
         realised_annual_projection = annual_run_rate * REALISATION_FACTOR
 
@@ -138,7 +141,7 @@ if disp_file and inv_file:
             st.metric(
                 label="Monthly Identified Opportunity",
                 value=f"£{monthly_opp:,.2f}",
-                help="The total theoretical saving identified in this specific data upload."
+                help="The total theoretical saving identified in this specific data upload (Switches + Leakage + Concessions)."
             )
 
         with col2:
@@ -161,10 +164,9 @@ if disp_file and inv_file:
 
         st.divider()
 
-# --- Section: Historical Trend ---
+        # --- Section: Historical Trend ---
         st.subheader("Margin Trajectory & Total Potential")
         
-        # Align the total opportunity variable from the KPI section
         current_opportunity = monthly_opp
         historical_df = fetch_mock_historical_data(current_margin, current_opportunity)
         
@@ -179,9 +181,7 @@ if disp_file and inv_file:
             }
         )
         
-        # Smooth the lines for a modern commercial aesthetic
         fig_trend.update_traces(line_shape='spline')
-        
         fig_trend.update_layout(
             height=280, 
             plot_bgcolor='rgba(0,0,0,0)',
@@ -239,6 +239,7 @@ if disp_file and inv_file:
                             )
                         with c2:
                             st.markdown(f"**Target:** {row['suggested_drug']}")
+                            st.markdown(f"**Implementation:** {row.get('clinical_effort', 'Uncategorised')}")
                             st.markdown(f"**Evidence:** {row.get('clinical_rationale', 'Rationale unavailable.')}")
                             
                             link = row.get('clinical_link', '')
@@ -247,10 +248,15 @@ if disp_file and inv_file:
                                 st.caption(f"Source: [{source}]({link})")
                             else:
                                 st.caption(f"Source: {source}")
+                                
+                            if mds_active and row.get('mds_warning', False):
+                                st.warning("MDS Alert: Ensure this brand-to-generic switch does not negatively impact your primary manufacturer rebate thresholds before proceeding.")
             else:
                 st.info("No immediate switch opportunities identified in this dataset.")
         else:
             st.info("Switch opportunity logic has not been processed.")
+            
+        st.caption("*Note: Financial projections represent gross dispensing margin. Practices must factor in local clinical administration time when reviewing 'Tier 2' switches.*")
 
         st.divider()
 

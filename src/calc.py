@@ -28,7 +28,9 @@ SWITCH_MAPPING = {
         'est_generic_cost': 0.85, 'est_generic_reimbursement': 1.15,
         'clinical_rationale': 'Equipotent PPI therapy for acid suppression. Lansoprazole currently yields a higher net dispensing margin under Category M.',
         'reference_source': 'Local ICB Formulary',
-        'clinical_link': 'https://bnf.nice.org.uk/treatment-summaries/proton-pump-inhibitors/'
+        'clinical_link': 'https://bnf.nice.org.uk/treatment-summaries/proton-pump-inhibitors/',
+        'clinical_effort': 'Tier 2: Clinical Review Required',
+        'mds_warning': False
     },
     '28572511000001104': { # Edoxaban 60mg tablets
         'switch_type': 'Therapeutic Switch',
@@ -36,7 +38,9 @@ SWITCH_MAPPING = {
         'est_generic_cost': 2.10, 'est_generic_reimbursement': 2.25,
         'clinical_rationale': 'Both are effective DOACs for stroke prevention in non-valvular AF. Apixaban availability offers a superior generic margin profile.',
         'reference_source': 'BNF / NICE NG196',
-        'clinical_link': 'https://bnf.nice.org.uk/treatment-summaries/anticoagulants-oral/'
+        'clinical_link': 'https://bnf.nice.org.uk/treatment-summaries/anticoagulants-oral/',
+        'clinical_effort': 'Tier 2: Clinical Review Required',
+        'mds_warning': False
     },
     
     # Brand to Generic Switches
@@ -46,7 +50,9 @@ SWITCH_MAPPING = {
         'est_generic_cost': 0.75, 'est_generic_reimbursement': 0.98,
         'clinical_rationale': 'Direct molecular equivalent. Eliminates branded prescribing leakage and aligns with primary care formulary guidance.',
         'reference_source': 'NICE CG71',
-        'clinical_link': 'https://bnf.nice.org.uk/drugs/atorvastatin/'
+        'clinical_link': 'https://bnf.nice.org.uk/drugs/atorvastatin/',
+        'clinical_effort': 'Tier 1: Immediate (Administrative)',
+        'mds_warning': True
     },
     '11417011000001106': { # Nexium 20mg tablets (Brand)
         'switch_type': 'Generic Switch',
@@ -54,7 +60,9 @@ SWITCH_MAPPING = {
         'est_generic_cost': 1.12, 'est_generic_reimbursement': 1.45,
         'clinical_rationale': 'Direct molecular equivalent.',
         'reference_source': 'BNF',
-        'clinical_link': 'https://bnf.nice.org.uk/drugs/esomeprazole/'
+        'clinical_link': 'https://bnf.nice.org.uk/drugs/esomeprazole/',
+        'clinical_effort': 'Tier 1: Immediate (Administrative)',
+        'mds_warning': True
     }
 }
 
@@ -153,6 +161,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clinical_rationale'] = switch_data.apply(lambda x: x.get('clinical_rationale', '') if isinstance(x, dict) else '')
     df['reference_source'] = switch_data.apply(lambda x: x.get('reference_source', '') if isinstance(x, dict) else '')
     df['clinical_link'] = switch_data.apply(lambda x: x.get('clinical_link', '') if isinstance(x, dict) else '')
+    df['clinical_effort'] = switch_data.apply(lambda x: x.get('clinical_effort', 'Uncategorised') if isinstance(x, dict) else 'Uncategorised')
+    df['mds_warning'] = switch_data.apply(lambda x: x.get('mds_warning', False) if isinstance(x, dict) else False)
 
     est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * 0.1118
     est_generic_net_reimb = (df['est_generic_reimb'] * df['quantity_dispensed']) - est_generic_clawback
@@ -190,6 +200,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         clinical_rationale=('clinical_rationale', 'first'),
         reference_source=('reference_source', 'first'),
         clinical_link=('clinical_link', 'first'),
+        clinical_effort=('clinical_effort', 'first'),
+        mds_warning=('mds_warning', 'first'),
         potential_savings_gbp=('potential_savings_gbp', 'sum'),
         confidence_list=('confidence', list)
     ).reset_index()
