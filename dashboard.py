@@ -7,34 +7,31 @@ from src.match import match_records
 from src.calc import calculate_metrics
 
 # --- Mock Database Function ---
-def fetch_mock_historical_data(current_margin, current_income, current_leakage):
+def fetch_mock_historical_data(current_margin, current_opportunity):
     """Simulates a database query returning the last 3 months of aggregate performance."""
     history = []
     
     history.append({
         'Month': 'Feb 2026',
-        'Net Income': current_income * random.uniform(0.92, 1.02),
-        'Practice Margin': current_margin * random.uniform(0.80, 0.90),
-        'Procurement Leakage': current_leakage * random.uniform(1.2, 1.5)
+        'Realised Margin': current_margin * random.uniform(0.85, 0.95),
+        'Unrealised Opportunity': current_opportunity * random.uniform(1.2, 1.4)
     })
     
     history.append({
         'Month': 'Mar 2026',
-        'Net Income': current_income * random.uniform(0.95, 1.05),
-        'Practice Margin': current_margin * random.uniform(0.85, 0.95), 
-        'Procurement Leakage': current_leakage * random.uniform(1.1, 1.3)
+        'Realised Margin': current_margin * random.uniform(0.90, 1.00),
+        'Unrealised Opportunity': current_opportunity * random.uniform(1.1, 1.25)
     })
     
     history.append({
         'Month': 'Apr 2026',
-        'Net Income': current_income,
-        'Practice Margin': current_margin,
-        'Procurement Leakage': current_leakage
+        'Realised Margin': current_margin,
+        'Unrealised Opportunity': current_opportunity
     })
     
     df_history = pd.DataFrame(history)
     return df_history
-
+    
 # --- Page Configuration & Styling ---
 st.set_page_config(page_title="MarginGuard AI | Practice Analytics", layout="wide", page_icon="🏦")
 
@@ -164,18 +161,21 @@ if disp_file and inv_file:
 
         st.divider()
 
-        # --- Section: Historical Trend ---
-        st.subheader("Performance Trend")
-        historical_df = fetch_mock_historical_data(current_margin, current_income, current_leakage)
+# --- Section: Historical Trend ---
+        st.subheader("Margin Trajectory & Opportunity Gap")
+        
+        # Align the total opportunity variable from the KPI section
+        current_opportunity = monthly_opp
+        historical_df = fetch_mock_historical_data(current_margin, current_opportunity)
         
         fig_trend = px.line(
             historical_df, 
             x='Month', 
-            y=['Practice Margin', 'Procurement Leakage'],
+            y=['Realised Margin', 'Unrealised Opportunity'],
             markers=True,
             color_discrete_map={
-                "Practice Margin": "#2ca02c", 
-                "Procurement Leakage": "#d62728" 
+                "Realised Margin": "#2ca02c", 
+                "Unrealised Opportunity": "#ff7f0e" 
             }
         )
         
