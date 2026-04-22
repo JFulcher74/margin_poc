@@ -162,13 +162,13 @@ if disp_file and inv_file:
         st.divider()
 
 # --- Section: Historical Trend ---
-        st.subheader("Margin Trajectory & Opportunity Gap")
+        st.subheader("Margin Trajectory & Total Potential")
         
         # Align the total opportunity variable from the KPI section
         current_opportunity = monthly_opp
         historical_df = fetch_mock_historical_data(current_margin, current_opportunity)
         
-        fig_trend = px.line(
+        fig_trend = px.area(
             historical_df, 
             x='Month', 
             y=['Realised Margin', 'Unrealised Opportunity'],
@@ -179,7 +179,9 @@ if disp_file and inv_file:
             }
         )
         
-        fig_trend.update_traces(line_shape='spline', fill='tozeroy')
+        # Smooth the lines for a modern commercial aesthetic
+        fig_trend.update_traces(line_shape='spline')
+        
         fig_trend.update_layout(
             height=280, 
             plot_bgcolor='rgba(0,0,0,0)',
