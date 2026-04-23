@@ -62,7 +62,6 @@ def get_clawback_rate(total_monthly_basic_price: float) -> float:
     else: return 0.1118
 
 def get_dispensing_fee(total_items: int) -> float:
-    """Returns the most recent NHS SFE dispensing fee in GBP based on monthly volume."""
     if total_items <= 460: return 2.58
     elif total_items <= 575: return 2.55
     elif total_items <= 690: return 2.52
@@ -78,8 +77,9 @@ def get_dispensing_fee(total_items: int) -> float:
     elif total_items <= 4600: return 2.19
     else: return 2.11
 
-def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None) -> pd.DataFrame:
+def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None) -> pd.DataFrame:
     df = df.copy()
+    if rebate_dict is None: rebate_dict = {}
     
     if 'bnf_code' not in df.columns: df['bnf_code'] = ''
     df['bnf_code'] = df['bnf_code'].fillna('').astype(str)
@@ -96,6 +96,16 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['maverick_leakage_gbp'] = df['acquisition_cost_gbp'] - df['benchmark_cost_gbp']
     df['maverick_leakage_gbp'] = df['maverick_leakage_gbp'].apply(lambda x: x if x > 0.01 else 0.0)
     
+    # Apply Wholesaler Rebates
+    supp_col = next((col for col in df.columns if col.lower() in ['supplier', 'wholesaler', 'supplier_name', 'cheapest_supplier']), None)
+    if supp_col:
+        df['rebate_pct'] = df[supp_col].map(rebate_dict).fillna(0.0)
+    else:
+        df['rebate_pct'] = rebate_dict.get('ALL', 0.0)
+        
+    df['wholesaler_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['rebate_pct'] / 100.0)
+    df['net_acquisition_cost_gbp'] = df['acquisition_cost_gbp'] - df['wholesaler_rebate_gbp']
+    
     df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
     
@@ -108,11 +118,7 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['gross_drug_reimbursed_gbp'] = df['total_units_dispensed'] * df['tariff_per_unit']
     df['gross_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'].fillna(0.0)
     
-    if override_basic_price is not None:
-        calc_basic_price = override_basic_price
-    else:
-        calc_basic_price = df['gross_drug_reimbursed_gbp'].sum()
-        
+    calc_basic_price = override_basic_price if override_basic_price is not None else df['gross_drug_reimbursed_gbp'].sum()
     dynamic_rate = get_clawback_rate(calc_basic_price)
     
     df['is_dnd'] = df['effective_dm_d_code'].isin(dnd_df['dm_d_code'])
@@ -120,7 +126,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clawback_deduction_gbp'] = df['gross_drug_reimbursed_gbp'] * df['clawback_rate']
     df['net_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'] - df['clawback_deduction_gbp']
     
-    # Core Logic Update: Dynamic Dispensing Fee Calculation
     total_prescriptions = len(df)
     dynamic_fee = get_dispensing_fee(total_prescriptions)
     
@@ -128,7 +133,7 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
     
     df['net_income_gbp'] = df['net_drug_reimbursed_gbp'] + df['dispensing_fee_gbp'] + df['vat_allowance_gbp']
-    df['margin_gbp'] = df['net_income_gbp'] - df['acquisition_cost_gbp']
+    df['margin_gbp'] = df['net_income_gbp'] - df['net_acquisition_cost_gbp']
     df['key_drug'] = np.where(df['effective_dm_d_code'].replace('', pd.NA).notna(), df['effective_dm_d_code'], df['clean_drug_name'])
 
     switch_data = df['effective_dm_d_code'].map(SWITCH_MAPPING)
@@ -163,6 +168,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         vat_allowance_gbp=('vat_allowance_gbp', 'sum'),
         net_income_gbp=('net_income_gbp', 'sum'),
         acquisition_cost_gbp=('acquisition_cost_gbp', 'sum'),
+        wholesaler_rebate_gbp=('wholesaler_rebate_gbp', 'sum'),
+        net_acquisition_cost_gbp=('net_acquisition_cost_gbp', 'sum'),
         maverick_leakage_gbp=('maverick_leakage_gbp', 'sum'),
         supplier_variance=('supplier_variance', 'first'),
         cheapest_supplier=('cheapest_supplier', 'first'),

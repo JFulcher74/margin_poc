@@ -27,6 +27,24 @@ with st.sidebar:
     st.header("Input Data")
     disp_file = st.file_uploader("Monthly Dispensing Export", type="csv", on_change=reset_data)
     inv_file = st.file_uploader("Supplier Invoice Export", type="csv", on_change=reset_data)
+    
+    rebate_dict = {}
+    if inv_file:
+        inv_file.seek(0)
+        inv_df_preview = pd.read_csv(inv_file)
+        inv_file.seek(0)
+        
+        supp_col = next((col for col in inv_df_preview.columns if col.lower() in ['supplier', 'wholesaler', 'supplier_name', 'vendor']), None)
+        
+        st.divider()
+        st.subheader("Wholesaler Rebates (%)")
+        if supp_col:
+            suppliers = sorted([str(s) for s in inv_df_preview[supp_col].dropna().unique() if str(s).strip()])
+            for s in suppliers:
+                rebate_dict[s] = st.number_input(f"{s} Rebate (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, on_change=reset_data)
+        else:
+            rebate_dict['ALL'] = st.number_input("Standard Rebate (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, on_change=reset_data)
+
     st.divider()
     st.write("Current Tariff: **April 2026**")
     
@@ -55,17 +73,18 @@ if disp_file and inv_file:
             dnd_df = pd.read_csv("dnd_mock.csv", dtype={'dm_d_code': str})
 
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
-            st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price)
+            st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict)
 
     df = st.session_state.master_data.copy()
     
-    # Display Applied Tier Data in Sidebar
     applied_price = df['applied_basic_price'].iloc[0] if not df.empty else 0.0
     applied_rate = df['applied_clawback_rate'].iloc[0] if not df.empty else 0.1118
+    applied_fee = df['applied_dispensing_fee'].iloc[0] if not df.empty else 2.11
     
     st.sidebar.divider()
     st.sidebar.metric("Basic Price (PPA Claim)", f"£{applied_price:,.2f}")
     st.sidebar.metric("Applied NHS Clawback", f"{applied_rate * 100:.2f}%")
+    st.sidebar.metric("Applied Dispensing Fee", f"£{applied_fee:.2f}")
     
     incomplete_mask = (df['acquisition_cost_gbp'] == 0.0) | (df['acquisition_cost_gbp'].isna())
     incomplete_data = df[incomplete_mask].copy()
@@ -103,10 +122,12 @@ if disp_file and inv_file:
         realised_annual_projection = annual_run_rate * REALISATION_FACTOR
 
         st.subheader("Financial Impact Projection")
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1: st.metric("Monthly Identified Opportunity", f"£{monthly_opp:,.2f}")
         with col2: st.metric("Projected Annualised Savings", f"£{realised_annual_projection:,.2f}")
-        with col3: st.metric("Full Potential (100% Implementation)", f"£{annual_run_rate:,.2f}", delta=f"£{annual_run_rate - realised_annual_projection:,.2f} variance", delta_color="normal")
+        with col3: st.metric("Full Potential (100% Implementation)", f"£{annual_run_rate:,.2f}")
+        with col4: st.metric("Retrospective Rebate Value", f"£{final_data.get('wholesaler_rebate_gbp', pd.Series([0])).sum():,.2f}")
+        
         st.caption(f"**Note on Methodology:** Annual projections are based on a linear run-rate of the current month's data. An {REALISATION_FACTOR*100:.0f}% realisation factor has been applied.")
         st.divider()
 
@@ -127,7 +148,7 @@ if disp_file and inv_file:
             loss_makers = final_data[final_data['margin_gbp'] < 0].copy()
             if not loss_makers.empty:
                 st.error(f"⚠️ {len(loss_makers)} product lines are currently dispensing at a net loss.")
-                st.dataframe(loss_makers[['example_drug_description', 'total_quantity_packs', 'net_income_gbp', 'acquisition_cost_gbp', 'margin_gbp']].sort_values('margin_gbp', ascending=True).style.background_gradient(subset=['margin_gbp'], cmap='Reds_r').format(precision=2), use_container_width=True, hide_index=True)
+                st.dataframe(loss_makers[['example_drug_description', 'total_quantity_packs', 'net_income_gbp', 'acquisition_cost_gbp', 'net_acquisition_cost_gbp', 'margin_gbp']].sort_values('margin_gbp', ascending=True).style.background_gradient(subset=['margin_gbp'], cmap='Reds_r').format(precision=2), use_container_width=True, hide_index=True)
             else: st.success("No loss-making items detected.")
 
         with tab2:
