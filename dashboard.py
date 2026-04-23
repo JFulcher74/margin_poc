@@ -75,8 +75,9 @@ if disp_file and inv_file:
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
             st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict)
             
-            # Initialise the OOS tracking column
-            st.session_state.master_data['is_oos'] = False
+    # Safeguard to ensure OOS column exists regardless of session state caching
+    if 'is_oos' not in st.session_state.master_data.columns:
+        st.session_state.master_data['is_oos'] = False
 
     df = st.session_state.master_data.copy()
     
@@ -121,7 +122,6 @@ if disp_file and inv_file:
         current_margin = final_data['margin_gbp'].sum()
         REALISATION_FACTOR = 0.85
         
-        # Recalculate Active Leakage excluding OOS items
         active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
         monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
         
