@@ -63,6 +63,10 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
+    # Auto-dump cache if schema is outdated
+    if 'master_data' in st.session_state and 'invoice_margin_gbp' not in st.session_state.master_data.columns:
+        del st.session_state['master_data']
+
     if 'master_data' not in st.session_state:
         with st.spinner("Calculating NHS Reimbursement & Leakage..."):
             disp_df = pd.read_csv(disp_file, dtype={'dm_d_code': str})
