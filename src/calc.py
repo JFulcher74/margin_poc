@@ -89,110 +89,152 @@ def get_dispensing_fee(total_items: int) -> float:
     elif total_items <= 4600: return 2.19
     else: return 2.11
 
-def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None, mds_active: bool = False, concessions_df: pd.DataFrame = None) -> pd.DataFrame:
+def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None, mds_active: bool = False) -> pd.DataFrame:
     df = df.copy()
     if rebate_dict is None: rebate_dict = {}
     
-    # 1. Clean BNF data
     if 'bnf_code' not in df.columns: df['bnf_code'] = ''
     df['bnf_code'] = df['bnf_code'].fillna('').astype(str)
     df['bnf_chapter_code'] = df['bnf_code'].str[:2]
-    df['therapeutic_group'] = df['bnf_chapter_code'].map(BNF_MAPPING).fillna('Unclassified')
+    df['therapeutic_group'] = df['bnf_chapter_code'].map(BNF_MAPPING).fillna('Unclassified / Other')
     
-    # 2. Units & Acquisition Costs (Strict)
     df['total_units_dispensed'] = df['pack_size'] * df['quantity_dispensed']
+    
     df['actual_cost_per_unit'] = df['avg_unit_cost'] / df['invoice_pack_size']
     df['best_cost_per_unit'] = df['min_unit_cost'] / df['invoice_pack_size']
     df['acquisition_cost_gbp'] = df['total_units_dispensed'] * df['actual_cost_per_unit']
     df['benchmark_cost_gbp'] = df['total_units_dispensed'] * df['best_cost_per_unit']
-    df['maverick_leakage_gbp'] = (df['acquisition_cost_gbp'] - df['benchmark_cost_gbp']).clip(lower=0)
-
-    # 3. Dynamic Wholesaler Rebates
-    supp_col = next((col for col in df.columns if col.lower() in ['supplier', 'wholesaler', 'supplier_name']), 'cheapest_supplier')
-    df['rebate_pct'] = df[supp_col].map(rebate_dict).fillna(0.0) if supp_col in df.columns else rebate_dict.get('ALL', 0.0)
-    df['wholesaler_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['rebate_pct'] / 100.0)
-
-    # 4. Drug Tariff Merge (Strict deduplication to prevent inflated sums)
-    clean_tariff = tariff_df.drop_duplicates(subset=['dm_d_code', 'tariff_form'])
-    df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df.get('matched_dm_d_code', ''))
-    df = df.merge(clean_tariff, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
-
-    # 5. Concessions & Reimbursement
-    active_concessions = CONCESSIONS_MAPPING.copy()
-    if concessions_df is not None and not concessions_df.empty:
-        uploaded = dict(zip(concessions_df['dm_d_code'].astype(str), pd.to_numeric(concessions_df['concession_price'], errors='coerce').fillna(0.0)))
-        active_concessions.update(uploaded)
-            
-    df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(0.0)
-    df['concession_price_gbp'] = df['effective_dm_d_code'].map(active_concessions).fillna(0.0)
-    df['final_reimbursement_price_gbp'] = np.maximum(df['tariff_price_gbp'], df['concession_price_gbp'])
+    df['acquisition_cost_gbp'] = df['acquisition_cost_gbp'].fillna(0.0)
+    df['maverick_leakage_gbp'] = df['acquisition_cost_gbp'] - df['benchmark_cost_gbp']
+    df['maverick_leakage_gbp'] = df['maverick_leakage_gbp'].apply(lambda x: x if x > 0.01 else 0.0)
     
-    df['tariff_pack_size'] = df['tariff_pack_size'].replace(0, 1).fillna(1.0)
+    supp_col = next((col for col in df.columns if col.lower() in ['supplier', 'wholesaler', 'supplier_name', 'cheapest_supplier']), None)
+    if supp_col:
+        df['rebate_pct'] = df[supp_col].map(rebate_dict).fillna(0.0)
+    else:
+        df['rebate_pct'] = rebate_dict.get('ALL', 0.0)
+        
+    df['wholesaler_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['rebate_pct'] / 100.0)
+    
+    df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
+    df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
+    
+    # NEW FIX: Only apply MDS math if the dashboard toggle is explicitly set to True
+    if mds_active:
+        df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
+    else:
+        df['mds_pct'] = 0.0
+        
+    df['mds_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['mds_pct'] / 100.0)
+    
+    df['total_rebates_gbp'] = df['wholesaler_rebate_gbp'] + df['mds_rebate_gbp']
+    df['net_acquisition_cost_gbp'] = df['acquisition_cost_gbp'] - df['total_rebates_gbp']
+    
+    df['concession_price_gbp'] = df['effective_dm_d_code'].map(CONCESSIONS_MAPPING).fillna(0.0)
+    df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(0.0)
+    df['final_reimbursement_price_gbp'] = np.maximum(df['tariff_price_gbp'], df['concession_price_gbp'])
+    df['concession_uplift_gbp'] = np.where(df['concession_price_gbp'] > df['tariff_price_gbp'], ((df['concession_price_gbp'] - df['tariff_price_gbp']) / df['tariff_pack_size']) * df['total_units_dispensed'], 0.0)
+    
     df['tariff_per_unit'] = df['final_reimbursement_price_gbp'] / df['tariff_pack_size']
     df['gross_drug_reimbursed_gbp'] = df['total_units_dispensed'] * df['tariff_per_unit']
+    df['gross_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'].fillna(0.0)
     
-    # 6. Basic Price & Clawback
-    total_ppa_claim = df['gross_drug_reimbursed_gbp'].sum()
-    calc_basic_price = override_basic_price if override_basic_price is not None else total_ppa_claim
+    calc_basic_price = override_basic_price if override_basic_price is not None else df['gross_drug_reimbursed_gbp'].sum()
     dynamic_rate = get_clawback_rate(calc_basic_price)
     
-    df['is_dnd'] = df['effective_dm_d_code'].isin(dnd_df['dm_d_code']) if 'dm_d_code' in dnd_df.columns else False
+    df['is_dnd'] = df['effective_dm_d_code'].isin(dnd_df['dm_d_code'])
     df['clawback_rate'] = np.where(df['is_dnd'], 0.0, dynamic_rate)
     df['clawback_deduction_gbp'] = df['gross_drug_reimbursed_gbp'] * df['clawback_rate']
     df['net_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'] - df['clawback_deduction_gbp']
-
-    # 7. MDS & Profit
-    df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0) if mds_active else 0.0
-    df['mds_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['mds_pct'] / 100.0)
-    df['total_rebates_gbp'] = df['wholesaler_rebate_gbp'] + df['mds_rebate_gbp']
     
-    df['dispensing_fee_gbp'] = np.where(df['pa_flag'].str.upper() == 'Y', 0.0, get_dispensing_fee(len(df)))
-    df['vat_allowance_gbp'] = np.where(df['pa_flag'].str.upper() == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
+    if 'pa_flag' not in df.columns:
+        df['pa_flag'] = 'N'
+    df['pa_flag'] = df['pa_flag'].fillna('N').str.upper()
+    
+    df['is_known_pa'] = df['effective_dm_d_code'].isin(KNOWN_PA_DMD_CODES) | df['clean_drug_name'].str.contains('vaccine|injection|implant|zoladex|depo-provera', case=False, na=False)
+    df['missed_pa_claim'] = df['is_known_pa'] & (df['pa_flag'] != 'Y')
+    
+    total_prescriptions = len(df)
+    dynamic_fee = get_dispensing_fee(total_prescriptions)
+    
+    df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', 0.0, dynamic_fee)
+    df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
+    df['lost_vat_gbp'] = np.where(df['missed_pa_claim'], df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
+    
     df['net_income_gbp'] = df['net_drug_reimbursed_gbp'] + df['dispensing_fee_gbp'] + df['vat_allowance_gbp']
     
     df['invoice_margin_gbp'] = df['net_income_gbp'] - df['acquisition_cost_gbp']
-    df['margin_gbp'] = df['invoice_margin_gbp'] + df['total_rebates_gbp']
+    df['margin_gbp'] = df['invoice_margin_gbp'] + df['total_rebates_gbp'] 
     
-    # 8. VAT Audit
-    df['is_known_pa'] = df['effective_dm_d_code'].isin(KNOWN_PA_DMD_CODES) | df['clean_drug_name'].str.contains('vaccine|injection|implant', case=False, na=False)
-    df['lost_vat_gbp'] = np.where((df['is_known_pa']) & (df['pa_flag'].str.upper() != 'Y'), df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
+    df['key_drug'] = np.where(df['effective_dm_d_code'].replace('', pd.NA).notna(), df['effective_dm_d_code'], df['clean_drug_name'])
 
-    # 9. Clinical Switches (Fixing missing switches)
     switch_data = df['effective_dm_d_code'].map(SWITCH_MAPPING)
     df['switch_type'] = switch_data.apply(lambda x: x['switch_type'] if isinstance(x, dict) else 'None')
     df['suggested_drug'] = switch_data.apply(lambda x: x['suggested_drug'] if isinstance(x, dict) else 'None')
+    df['est_generic_cost'] = switch_data.apply(lambda x: x['est_generic_cost'] if isinstance(x, dict) else 0.0)
+    df['est_generic_reimb'] = switch_data.apply(lambda x: x['est_generic_reimbursement'] if isinstance(x, dict) else 0.0)
     
-    est_gen_reimb = switch_data.apply(lambda x: x['est_generic_reimbursement'] if isinstance(x, dict) else 0.0)
-    est_gen_cost = switch_data.apply(lambda x: x['est_generic_cost'] if isinstance(x, dict) else 0.0)
+    df['est_generic_net_cost'] = df['est_generic_cost'] * (1 - (df['rebate_pct'] / 100.0))
     
-    gen_net_cost = est_gen_cost * (1 - (df['rebate_pct'] / 100.0))
-    gen_net_reimb = (est_gen_reimb * df['quantity_dispensed']) * (1 - dynamic_rate)
-    df['est_generic_margin'] = (gen_net_reimb + df['dispensing_fee_gbp']) - (gen_net_cost * df['quantity_dispensed'])
-    df['potential_savings_gbp'] = np.where(df['switch_type'] != 'None', (df['est_generic_margin'] - df['margin_gbp']).clip(lower=0), 0.0)
+    est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * dynamic_rate
+    est_generic_net_reimb = (df['est_generic_reimb'] * df['quantity_dispensed']) - est_generic_clawback
+    est_generic_income = est_generic_net_reimb + df['dispensing_fee_gbp'] 
+    
+    est_generic_total_cost = df['est_generic_net_cost'] * df['quantity_dispensed']
+    df['est_generic_margin'] = est_generic_income - est_generic_total_cost
+    
+    df['potential_savings_gbp'] = np.where(df['switch_type'] != 'None', df['est_generic_margin'] - df['margin_gbp'], 0.0)
+    df['potential_savings_gbp'] = np.where(df['potential_savings_gbp'] > 0, df['potential_savings_gbp'], 0.0)
+    
+    df['clinical_rationale'] = switch_data.apply(lambda x: x.get('clinical_rationale', '') if isinstance(x, dict) else '')
+    df['reference_source'] = switch_data.apply(lambda x: x.get('reference_source', '') if isinstance(x, dict) else '')
+    df['clinical_link'] = switch_data.apply(lambda x: x.get('clinical_link', '') if isinstance(x, dict) else '')
+    df['clinical_effort'] = switch_data.apply(lambda x: x.get('clinical_effort', 'Uncategorised') if isinstance(x, dict) else 'Uncategorised')
+    df['mds_warning'] = switch_data.apply(lambda x: x.get('mds_warning', False) if isinstance(x, dict) else False)
+    df['locality_alignment'] = switch_data.apply(lambda x: x.get('locality_alignment', 'Unclassified') if isinstance(x, dict) else 'Unclassified')
+    df['incentive_scheme'] = switch_data.apply(lambda x: x.get('incentive_scheme', 'N/A') if isinstance(x, dict) else 'N/A')
 
-    # 10. Aggregation
-    return df.groupby('effective_dm_d_code').agg(
+    grouped = df.groupby('key_drug').agg(
         example_drug_description=('drug_description', 'first'),
         therapeutic_group=('therapeutic_group', 'first'),
         total_quantity_packs=('quantity_dispensed', 'sum'),
         gross_drug_reimbursed_gbp=('gross_drug_reimbursed_gbp', 'sum'),
+        concession_uplift_gbp=('concession_uplift_gbp', 'sum'),
         clawback_deduction_gbp=('clawback_deduction_gbp', 'sum'),
         net_drug_reimbursed_gbp=('net_drug_reimbursed_gbp', 'sum'),
         dispensing_fees_earned_gbp=('dispensing_fee_gbp', 'sum'),
         vat_allowance_gbp=('vat_allowance_gbp', 'sum'),
         lost_vat_gbp=('lost_vat_gbp', 'sum'),
+        missed_pa_claim=('missed_pa_claim', 'max'),
         net_income_gbp=('net_income_gbp', 'sum'),
         acquisition_cost_gbp=('acquisition_cost_gbp', 'sum'),
+        wholesaler_rebate_gbp=('wholesaler_rebate_gbp', 'sum'),
+        mds_rebate_gbp=('mds_rebate_gbp', 'sum'),
         total_rebates_gbp=('total_rebates_gbp', 'sum'),
+        net_acquisition_cost_gbp=('net_acquisition_cost_gbp', 'sum'),
         maverick_leakage_gbp=('maverick_leakage_gbp', 'sum'),
+        supplier_variance=('supplier_variance', 'first'),
+        cheapest_supplier=('cheapest_supplier', 'first'),
         invoice_margin_gbp=('invoice_margin_gbp', 'sum'),
         margin_gbp=('margin_gbp', 'sum'),
         switch_type=('switch_type', 'first'),
         suggested_drug=('suggested_drug', 'first'),
+        clinical_rationale=('clinical_rationale', 'first'),
+        reference_source=('reference_source', 'first'),
+        clinical_link=('clinical_link', 'first'),
+        clinical_effort=('clinical_effort', 'first'),
+        mds_warning=('mds_warning', 'first'),
+        locality_alignment=('locality_alignment', 'first'),
+        incentive_scheme=('incentive_scheme', 'first'),
         potential_savings_gbp=('potential_savings_gbp', 'sum'),
-        locality_alignment=('key_drug', lambda x: switch_data.iloc[0].get('locality_alignment', 'Unclassified') if isinstance(switch_data.iloc[0], dict) else 'Unclassified'),
-        incentive_scheme=('key_drug', lambda x: switch_data.iloc[0].get('incentive_scheme', 'N/A') if isinstance(switch_data.iloc[0], dict) else 'N/A'),
-        applied_basic_price=('key_drug', lambda x: calc_basic_price),
-        applied_clawback_rate=('key_drug', lambda x: dynamic_rate),
-        applied_dispensing_fee=('key_drug', lambda x: get_dispensing_fee(len(df)))
+        confidence_list=('confidence', list)
     ).reset_index()
+
+    grouped['confidence'] = grouped['confidence_list'].apply(get_worst_confidence)
+    grouped.drop(columns=['confidence_list'], inplace=True)
+    
+    grouped['applied_basic_price'] = calc_basic_price
+    grouped['applied_clawback_rate'] = dynamic_rate
+    grouped['applied_dispensing_fee'] = dynamic_fee
+
+    return grouped

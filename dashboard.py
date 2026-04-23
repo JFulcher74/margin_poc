@@ -28,7 +28,6 @@ with st.sidebar:
     st.header("Input Data")
     disp_file = st.file_uploader("Monthly Dispensing Export", type="csv", on_change=reset_data)
     inv_file = st.file_uploader("Supplier Invoice Export", type="csv", on_change=reset_data)
-    conc_file = st.file_uploader("Price Concessions Export (Optional)", type="csv", on_change=reset_data)
     
     rebate_dict = {}
     if inv_file:
@@ -65,29 +64,20 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
-    if 'master_data' in st.session_state and 'potential_savings_gbp' not in st.session_state.master_data.columns:
-        st.session_state.clear()
+    if 'master_data' in st.session_state and 'lost_vat_gbp' not in st.session_state.master_data.columns:
+        del st.session_state['master_data']
 
     if 'master_data' not in st.session_state:
         with st.spinner("Calculating NHS Reimbursement & Leakage..."):
             disp_df = pd.read_csv(disp_file, dtype={'dm_d_code': str})
             inv_df = pd.read_csv(inv_file, dtype={'dm_d_code': str})
-            
-            concessions_df = None
-            if conc_file:
-                try:
-                    concessions_df = pd.read_csv(conc_file, dtype=str)
-                except Exception:
-                    concessions_df = pd.DataFrame()
-                
             tariff_raw = pd.read_csv("Part VIIIA April 2026.csv", dtype=str)
             if 'VMPP Snomed Code' not in tariff_raw.columns:
                 tariff_raw = pd.read_csv("Part VIIIA April 2026.csv", skiprows=2, dtype=str)
-                
             dnd_df = pd.read_csv("dnd_mock.csv", dtype={'dm_d_code': str})
 
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
-            st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict, mds_active, concessions_df)
+            st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict, mds_active)
             
     if 'is_oos' not in st.session_state.master_data.columns:
         st.session_state.master_data['is_oos'] = False
