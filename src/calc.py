@@ -89,7 +89,7 @@ def get_dispensing_fee(total_items: int) -> float:
     elif total_items <= 4600: return 2.19
     else: return 2.11
 
-def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None, mds_active: bool = False) -> pd.DataFrame:
+def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None, mds_active: bool = False, concessions_df: pd.DataFrame = None) -> pd.DataFrame:
     df = df.copy()
     if rebate_dict is None: rebate_dict = {}
     
@@ -119,7 +119,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
     
-    # NEW FIX: Only apply MDS math if the dashboard toggle is explicitly set to True
     if mds_active:
         df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
     else:
@@ -130,7 +129,13 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['total_rebates_gbp'] = df['wholesaler_rebate_gbp'] + df['mds_rebate_gbp']
     df['net_acquisition_cost_gbp'] = df['acquisition_cost_gbp'] - df['total_rebates_gbp']
     
-    df['concession_price_gbp'] = df['effective_dm_d_code'].map(CONCESSIONS_MAPPING).fillna(0.0)
+    active_concessions = CONCESSIONS_MAPPING.copy()
+    if concessions_df is not None and not concessions_df.empty:
+        if 'dm_d_code' in concessions_df.columns and 'concession_price' in concessions_df.columns:
+            uploaded_concessions = dict(zip(concessions_df['dm_d_code'].astype(str), pd.to_numeric(concessions_df['concession_price'], errors='coerce')))
+            active_concessions.update(uploaded_concessions)
+            
+    df['concession_price_gbp'] = df['effective_dm_d_code'].map(active_concessions).fillna(0.0)
     df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(0.0)
     df['final_reimbursement_price_gbp'] = np.maximum(df['tariff_price_gbp'], df['concession_price_gbp'])
     df['concession_uplift_gbp'] = np.where(df['concession_price_gbp'] > df['tariff_price_gbp'], ((df['concession_price_gbp'] - df['tariff_price_gbp']) / df['tariff_pack_size']) * df['total_units_dispensed'], 0.0)
