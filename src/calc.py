@@ -46,6 +46,13 @@ CONCESSIONS_MAPPING = {
     '15152011000001109': 8.20, '14188111000001100': 3.10
 }
 
+# Retrospective Manufacturer Discount Scheme (%)
+MDS_MAPPING = {
+    '28572511000001104': 10.0,  # Edoxaban 60mg tablets
+    '8058211000001101': 15.0,   # Lipitor 20mg tablets
+    '11417011000001106': 12.5   # Nexium 20mg tablets
+}
+
 def get_clawback_rate(total_monthly_basic_price: float) -> float:
     if total_monthly_basic_price <= 2000.00: return 0.0317
     elif total_monthly_basic_price <= 4000.00: return 0.0593
@@ -96,7 +103,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['maverick_leakage_gbp'] = df['acquisition_cost_gbp'] - df['benchmark_cost_gbp']
     df['maverick_leakage_gbp'] = df['maverick_leakage_gbp'].apply(lambda x: x if x > 0.01 else 0.0)
     
-    # Apply Wholesaler Rebates
     supp_col = next((col for col in df.columns if col.lower() in ['supplier', 'wholesaler', 'supplier_name', 'cheapest_supplier']), None)
     if supp_col:
         df['rebate_pct'] = df[supp_col].map(rebate_dict).fillna(0.0)
@@ -104,10 +110,16 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         df['rebate_pct'] = rebate_dict.get('ALL', 0.0)
         
     df['wholesaler_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['rebate_pct'] / 100.0)
-    df['net_acquisition_cost_gbp'] = df['acquisition_cost_gbp'] - df['wholesaler_rebate_gbp']
     
     df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
+    
+    # Apply MDS Rebates
+    df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
+    df['mds_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['mds_pct'] / 100.0)
+    
+    df['total_rebates_gbp'] = df['wholesaler_rebate_gbp'] + df['mds_rebate_gbp']
+    df['net_acquisition_cost_gbp'] = df['acquisition_cost_gbp'] - df['total_rebates_gbp']
     
     df['concession_price_gbp'] = df['effective_dm_d_code'].map(CONCESSIONS_MAPPING).fillna(0.0)
     df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(0.0)
@@ -131,9 +143,12 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     
     df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', 0.0, dynamic_fee)
     df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
-    
     df['net_income_gbp'] = df['net_drug_reimbursed_gbp'] + df['dispensing_fee_gbp'] + df['vat_allowance_gbp']
-    df['margin_gbp'] = df['net_income_gbp'] - df['net_acquisition_cost_gbp']
+    
+    # Financial Reconciliation
+    df['invoice_margin_gbp'] = df['net_income_gbp'] - df['acquisition_cost_gbp']
+    df['margin_gbp'] = df['invoice_margin_gbp'] + df['total_rebates_gbp'] # This is Net-Net Margin
+    
     df['key_drug'] = np.where(df['effective_dm_d_code'].replace('', pd.NA).notna(), df['effective_dm_d_code'], df['clean_drug_name'])
 
     switch_data = df['effective_dm_d_code'].map(SWITCH_MAPPING)
@@ -169,10 +184,13 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         net_income_gbp=('net_income_gbp', 'sum'),
         acquisition_cost_gbp=('acquisition_cost_gbp', 'sum'),
         wholesaler_rebate_gbp=('wholesaler_rebate_gbp', 'sum'),
+        mds_rebate_gbp=('mds_rebate_gbp', 'sum'),
+        total_rebates_gbp=('total_rebates_gbp', 'sum'),
         net_acquisition_cost_gbp=('net_acquisition_cost_gbp', 'sum'),
         maverick_leakage_gbp=('maverick_leakage_gbp', 'sum'),
         supplier_variance=('supplier_variance', 'first'),
         cheapest_supplier=('cheapest_supplier', 'first'),
+        invoice_margin_gbp=('invoice_margin_gbp', 'sum'),
         margin_gbp=('margin_gbp', 'sum'),
         switch_type=('switch_type', 'first'),
         suggested_drug=('suggested_drug', 'first'),

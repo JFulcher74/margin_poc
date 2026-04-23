@@ -75,7 +75,6 @@ if disp_file and inv_file:
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
             st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict)
             
-    # Safeguard to ensure OOS column exists regardless of session state caching
     if 'is_oos' not in st.session_state.master_data.columns:
         st.session_state.master_data['is_oos'] = False
 
@@ -110,7 +109,8 @@ if disp_file and inv_file:
             resolved_rows = edited_incomplete[resolved_mask]
             for index, row in resolved_rows.iterrows():
                 st.session_state.master_data.loc[index, 'acquisition_cost_gbp'] = row['acquisition_cost_gbp']
-                st.session_state.master_data.loc[index, 'margin_gbp'] = row['net_income_gbp'] - row['acquisition_cost_gbp']
+                st.session_state.master_data.loc[index, 'invoice_margin_gbp'] = row['net_income_gbp'] - row['acquisition_cost_gbp']
+                st.session_state.master_data.loc[index, 'margin_gbp'] = st.session_state.master_data.loc[index, 'invoice_margin_gbp'] + st.session_state.master_data.loc[index, 'total_rebates_gbp']
             st.rerun()
 
     final_data = st.session_state.master_data[st.session_state.master_data['acquisition_cost_gbp'] > 0.0].copy()
@@ -119,27 +119,26 @@ if disp_file and inv_file:
         gbp_cols = [col for col in final_data.columns if 'gbp' in col]
         final_data[gbp_cols] = final_data[gbp_cols].round(2)
 
-        current_margin = final_data['margin_gbp'].sum()
-        REALISATION_FACTOR = 0.85
+        current_invoice_margin = final_data['invoice_margin_gbp'].sum()
+        current_net_net_margin = final_data['margin_gbp'].sum()
+        total_outstanding_rebates = final_data['total_rebates_gbp'].sum()
         
+        REALISATION_FACTOR = 0.85
         active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
         monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
-        
         annual_run_rate = monthly_opp * 12
-        realised_annual_projection = annual_run_rate * REALISATION_FACTOR
 
-        st.subheader("Financial Impact Projection")
+        st.subheader("Financial Performance & Cash Flow")
         col1, col2, col3, col4 = st.columns(4)
-        with col1: st.metric("Monthly Identified Opportunity", f"£{monthly_opp:,.2f}")
-        with col2: st.metric("Projected Annualised Savings", f"£{realised_annual_projection:,.2f}")
-        with col3: st.metric("Full Potential (100% Implementation)", f"£{annual_run_rate:,.2f}")
-        with col4: st.metric("Retrospective Rebate Value", f"£{final_data.get('wholesaler_rebate_gbp', pd.Series([0])).sum():,.2f}")
+        with col1: st.metric("Invoice Margin (Cash Flow)", f"£{current_invoice_margin:,.2f}")
+        with col2: st.metric("Total Outstanding Rebates", f"£{total_outstanding_rebates:,.2f}")
+        with col3: st.metric("Net-Net Margin (Profitability)", f"£{current_net_net_margin:,.2f}")
+        with col4: st.metric("Projected Annual Opportunity", f"£{annual_run_rate * REALISATION_FACTOR:,.2f}")
         
-        st.caption(f"**Note on Methodology:** Annual projections are based on a linear run-rate of the current month's data. An {REALISATION_FACTOR*100:.0f}% realisation factor has been applied.")
         st.divider()
 
         st.subheader("Margin Trajectory & Total Potential")
-        historical_df = fetch_mock_historical_data(current_margin, monthly_opp)
+        historical_df = fetch_mock_historical_data(current_net_net_margin, monthly_opp)
         fig_trend = px.area(historical_df, x='Month', y=['Realised Margin', 'Unrealised Opportunity'], markers=True, color_discrete_map={"Realised Margin": "#2ca02c", "Unrealised Opportunity": "#ff7f0e"})
         fig_trend.update_traces(line_shape='spline')
         fig_trend.update_layout(height=280, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', xaxis_title="", yaxis_title="", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=20, b=0))
@@ -152,10 +151,10 @@ if disp_file and inv_file:
         tab1, tab2, tab3, tab4 = st.tabs(["🚨 Critical Losses", "🔄 Clinical Switches", "🛒 Procurement Waste", "🛡️ Price Concessions"])
         
         with tab1:
-            loss_makers = final_data[final_data['margin_gbp'] < 0].copy()
+            loss_makers = final_data[final_data['invoice_margin_gbp'] < 0].copy()
             if not loss_makers.empty:
-                st.error(f"⚠️ {len(loss_makers)} product lines are currently dispensing at a net loss.")
-                st.dataframe(loss_makers[['example_drug_description', 'total_quantity_packs', 'net_income_gbp', 'acquisition_cost_gbp', 'net_acquisition_cost_gbp', 'margin_gbp']].sort_values('margin_gbp', ascending=True).style.background_gradient(subset=['margin_gbp'], cmap='Reds_r').format(precision=2), use_container_width=True, hide_index=True)
+                st.error(f"⚠️ {len(loss_makers)} product lines are dispensing at a cash flow loss at the point of invoice.")
+                st.dataframe(loss_makers[['example_drug_description', 'total_quantity_packs', 'net_income_gbp', 'acquisition_cost_gbp', 'total_rebates_gbp', 'invoice_margin_gbp', 'margin_gbp']].sort_values('invoice_margin_gbp', ascending=True).style.background_gradient(subset=['invoice_margin_gbp', 'margin_gbp'], cmap='Reds_r').format(precision=2), use_container_width=True, hide_index=True)
             else: st.success("No loss-making items detected.")
 
         with tab2:
