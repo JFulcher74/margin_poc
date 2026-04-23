@@ -63,8 +63,7 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
-    # Auto-dump cache if schema is outdated
-    if 'master_data' in st.session_state and 'invoice_margin_gbp' not in st.session_state.master_data.columns:
+    if 'master_data' in st.session_state and 'locality_alignment' not in st.session_state.master_data.columns:
         del st.session_state['master_data']
 
     if 'master_data' not in st.session_state:
@@ -164,12 +163,25 @@ if disp_file and inv_file:
         with tab2:
             if 'potential_savings_gbp' in final_data.columns and not final_data[final_data['potential_savings_gbp'] > 0.0].empty:
                 switch_df = final_data[final_data['potential_savings_gbp'] > 0.0].copy()
-                st.dataframe(switch_df[['example_drug_description', 'suggested_drug', 'switch_type', 'potential_savings_gbp']].sort_values('potential_savings_gbp', ascending=False), hide_index=True, use_container_width=True)
+                
+                st.markdown("Prioritise switches that align with the local ICB Formulary to protect Prescribing Incentive payments.")
+                st.dataframe(switch_df[['example_drug_description', 'suggested_drug', 'switch_type', 'locality_alignment', 'potential_savings_gbp']].sort_values('potential_savings_gbp', ascending=False), hide_index=True, use_container_width=True)
+                
                 for index, row in switch_df.sort_values('potential_savings_gbp', ascending=False).iterrows():
                     with st.expander(f"Review Switch: {row['example_drug_description']} to {row['suggested_drug']}"):
-                        st.markdown(f"**Implementation:** {row.get('clinical_effort', 'Uncategorised')}")
-                        st.markdown(f"**Clinical Justification:** {row.get('clinical_rationale', 'No rationale provided.')}")
-                        if mds_active and row.get('mds_warning', False): st.warning("MDS Alert: Ensure this switch does not impact rebate thresholds.")
+                        
+                        colA, colB = st.columns(2)
+                        with colA:
+                            st.markdown(f"**Implementation:** {row.get('clinical_effort', 'Uncategorised')}")
+                            st.markdown(f"**Clinical Justification:** {row.get('clinical_rationale', 'No rationale provided.')}")
+                        with colB:
+                            alignment = row.get('locality_alignment', 'Unclassified')
+                            color = "🟢" if "Green" in alignment else "🔴" if "Grey" in alignment else "⚪"
+                            st.markdown(f"**ICB Alignment:** {color} {alignment}")
+                            st.markdown(f"**Incentive Impact:** {row.get('incentive_scheme', 'N/A')}")
+                            
+                        if mds_active and row.get('mds_warning', False): 
+                            st.warning("MDS Alert: Ensure this switch does not impact rebate thresholds.")
             else: st.success("No immediate switch opportunities identified.")
 
         with tab3:

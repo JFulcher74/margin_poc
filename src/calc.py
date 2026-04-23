@@ -16,28 +16,32 @@ SWITCH_MAPPING = {
         'est_generic_cost': 0.85, 'est_generic_reimbursement': 1.15,
         'clinical_rationale': 'Equipotent PPI therapy for acid suppression. Lansoprazole currently yields a higher net dispensing margin under Category M.',
         'reference_source': 'Local ICB Formulary', 'clinical_link': 'https://bnf.nice.org.uk/treatment-summaries/proton-pump-inhibitors/',
-        'clinical_effort': 'Tier 2: Clinical Review Required', 'mds_warning': False
+        'clinical_effort': 'Tier 2: Clinical Review Required', 'mds_warning': False,
+        'locality_alignment': 'Green List (Preferred)', 'incentive_scheme': 'Aligned with QIPP targets'
     },
     '28572511000001104': {
         'switch_type': 'Therapeutic Switch', 'suggested_drug': 'Apixaban 5mg tablets',
         'est_generic_cost': 2.10, 'est_generic_reimbursement': 2.25,
         'clinical_rationale': 'Both are effective DOACs for stroke prevention in non-valvular AF. Apixaban availability offers a superior generic margin profile.',
         'reference_source': 'BNF / NICE NG196', 'clinical_link': 'https://bnf.nice.org.uk/treatment-summaries/anticoagulants-oral/',
-        'clinical_effort': 'Tier 2: Clinical Review Required', 'mds_warning': False
+        'clinical_effort': 'Tier 2: Clinical Review Required', 'mds_warning': False,
+        'locality_alignment': 'Green List (Preferred)', 'incentive_scheme': 'Aligned with National DOAC Guidance'
     },
     '8058211000001101': {
         'switch_type': 'Generic Switch', 'suggested_drug': 'Atorvastatin 20mg tablets (Category M)',
         'est_generic_cost': 0.75, 'est_generic_reimbursement': 0.98,
         'clinical_rationale': 'Direct molecular equivalent. Eliminates branded prescribing leakage and aligns with primary care formulary guidance.',
         'reference_source': 'NICE CG71', 'clinical_link': 'https://bnf.nice.org.uk/drugs/atorvastatin/',
-        'clinical_effort': 'Tier 1: Immediate (Administrative)', 'mds_warning': True
+        'clinical_effort': 'Tier 1: Immediate (Administrative)', 'mds_warning': True,
+        'locality_alignment': 'Green List (Preferred)', 'incentive_scheme': 'High-Intensity Statin Target'
     },
     '11417011000001106': {
         'switch_type': 'Generic Switch', 'suggested_drug': 'Esomeprazole 20mg tablets (Category M)',
         'est_generic_cost': 1.12, 'est_generic_reimbursement': 1.45,
         'clinical_rationale': 'Direct molecular equivalent.',
         'reference_source': 'BNF', 'clinical_link': 'https://bnf.nice.org.uk/drugs/esomeprazole/',
-        'clinical_effort': 'Tier 1: Immediate (Administrative)', 'mds_warning': True
+        'clinical_effort': 'Tier 1: Immediate (Administrative)', 'mds_warning': True,
+        'locality_alignment': 'Grey List (Non-Preferred)', 'incentive_scheme': 'Conflicts with local PPI targets'
     }
 }
 
@@ -46,11 +50,8 @@ CONCESSIONS_MAPPING = {
     '15152011000001109': 8.20, '14188111000001100': 3.10
 }
 
-# Retrospective Manufacturer Discount Scheme (%)
 MDS_MAPPING = {
-    '28572511000001104': 10.0,  # Edoxaban 60mg tablets
-    '8058211000001101': 15.0,   # Lipitor 20mg tablets
-    '11417011000001106': 12.5   # Nexium 20mg tablets
+    '28572511000001104': 10.0, '8058211000001101': 15.0, '11417011000001106': 12.5
 }
 
 def get_clawback_rate(total_monthly_basic_price: float) -> float:
@@ -114,7 +115,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
     
-    # Apply MDS Rebates
     df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
     df['mds_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['mds_pct'] / 100.0)
     
@@ -145,9 +145,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
     df['net_income_gbp'] = df['net_drug_reimbursed_gbp'] + df['dispensing_fee_gbp'] + df['vat_allowance_gbp']
     
-    # Financial Reconciliation
     df['invoice_margin_gbp'] = df['net_income_gbp'] - df['acquisition_cost_gbp']
-    df['margin_gbp'] = df['invoice_margin_gbp'] + df['total_rebates_gbp'] # This is Net-Net Margin
+    df['margin_gbp'] = df['invoice_margin_gbp'] + df['total_rebates_gbp'] 
     
     df['key_drug'] = np.where(df['effective_dm_d_code'].replace('', pd.NA).notna(), df['effective_dm_d_code'], df['clean_drug_name'])
 
@@ -161,6 +160,10 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clinical_link'] = switch_data.apply(lambda x: x.get('clinical_link', '') if isinstance(x, dict) else '')
     df['clinical_effort'] = switch_data.apply(lambda x: x.get('clinical_effort', 'Uncategorised') if isinstance(x, dict) else 'Uncategorised')
     df['mds_warning'] = switch_data.apply(lambda x: x.get('mds_warning', False) if isinstance(x, dict) else False)
+    
+    # New Locality Alignment Fields
+    df['locality_alignment'] = switch_data.apply(lambda x: x.get('locality_alignment', 'Unclassified') if isinstance(x, dict) else 'Unclassified')
+    df['incentive_scheme'] = switch_data.apply(lambda x: x.get('incentive_scheme', 'N/A') if isinstance(x, dict) else 'N/A')
 
     est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * dynamic_rate
     est_generic_net_reimb = (df['est_generic_reimb'] * df['quantity_dispensed']) - est_generic_clawback
@@ -199,6 +202,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         clinical_link=('clinical_link', 'first'),
         clinical_effort=('clinical_effort', 'first'),
         mds_warning=('mds_warning', 'first'),
+        locality_alignment=('locality_alignment', 'first'),
+        incentive_scheme=('incentive_scheme', 'first'),
         potential_savings_gbp=('potential_savings_gbp', 'sum'),
         confidence_list=('confidence', list)
     ).reset_index()
