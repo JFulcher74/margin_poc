@@ -89,7 +89,7 @@ def get_dispensing_fee(total_items: int) -> float:
     elif total_items <= 4600: return 2.19
     else: return 2.11
 
-def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None) -> pd.DataFrame:
+def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None, mds_active: bool = False) -> pd.DataFrame:
     df = df.copy()
     if rebate_dict is None: rebate_dict = {}
     
@@ -119,7 +119,12 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
     
-    df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
+    # NEW FIX: Only apply MDS math if the dashboard toggle is explicitly set to True
+    if mds_active:
+        df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
+    else:
+        df['mds_pct'] = 0.0
+        
     df['mds_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['mds_pct'] / 100.0)
     
     df['total_rebates_gbp'] = df['wholesaler_rebate_gbp'] + df['mds_rebate_gbp']
@@ -169,7 +174,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['est_generic_cost'] = switch_data.apply(lambda x: x['est_generic_cost'] if isinstance(x, dict) else 0.0)
     df['est_generic_reimb'] = switch_data.apply(lambda x: x['est_generic_reimbursement'] if isinstance(x, dict) else 0.0)
     
-    # NEW FIX: Apply wholesaler rebate to the generic cost estimate
     df['est_generic_net_cost'] = df['est_generic_cost'] * (1 - (df['rebate_pct'] / 100.0))
     
     est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * dynamic_rate

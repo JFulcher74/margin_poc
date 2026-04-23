@@ -51,7 +51,7 @@ with st.sidebar:
     
     st.divider()
     st.subheader("Financial Settings")
-    mds_active = st.toggle("MDS / Rebate Schemes Active", value=False)
+    mds_active = st.toggle("MDS / Rebate Schemes Active", value=False, on_change=reset_data)
     manual_override = st.toggle("Override PPA Claim Value", value=False, help="Use this if uploading partial month data to prevent inaccurate clawback scaling.")
     
     if manual_override:
@@ -77,7 +77,7 @@ if disp_file and inv_file:
             dnd_df = pd.read_csv("dnd_mock.csv", dtype={'dm_d_code': str})
 
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
-            st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict)
+            st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict, mds_active)
             
     if 'is_oos' not in st.session_state.master_data.columns:
         st.session_state.master_data['is_oos'] = False
@@ -129,7 +129,6 @@ if disp_file and inv_file:
         active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
         total_lost_vat = final_data.get('lost_vat_gbp', pd.Series([0])).sum()
         
-        # FIX: Removed concession uplift from leakage. It is already in the Net-Net margin.
         monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + total_lost_vat
         
         optimised_target_margin = current_net_net_margin + (monthly_opp * REALISATION_FACTOR)
