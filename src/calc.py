@@ -54,12 +54,8 @@ MDS_MAPPING = {
     '28572511000001104': 10.0, '8058211000001101': 15.0, '11417011000001106': 12.5
 }
 
-# Known PA Items (Injectables, Vaccines, Implants)
 KNOWN_PA_DMD_CODES = [
-    '1411111000001103', # Hydroxocobalamin 1mg/1ml
-    '10862711000001106', # Zoladex 3.6mg implant
-    '3371911000001104', # Depo-Provera 150mg/1ml
-    '15569411000001107' # Prostap 3 DCS 11.25mg
+    '1411111000001103', '10862711000001106', '3371911000001104', '15569411000001107'
 ]
 
 def get_clawback_rate(total_monthly_basic_price: float) -> float:
@@ -146,7 +142,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clawback_deduction_gbp'] = df['gross_drug_reimbursed_gbp'] * df['clawback_rate']
     df['net_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'] - df['clawback_deduction_gbp']
     
-    # PA & VAT Audit Logic
     if 'pa_flag' not in df.columns:
         df['pa_flag'] = 'N'
     df['pa_flag'] = df['pa_flag'].fillna('N').str.upper()
@@ -173,23 +168,27 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['suggested_drug'] = switch_data.apply(lambda x: x['suggested_drug'] if isinstance(x, dict) else 'None')
     df['est_generic_cost'] = switch_data.apply(lambda x: x['est_generic_cost'] if isinstance(x, dict) else 0.0)
     df['est_generic_reimb'] = switch_data.apply(lambda x: x['est_generic_reimbursement'] if isinstance(x, dict) else 0.0)
+    
+    # NEW FIX: Apply wholesaler rebate to the generic cost estimate
+    df['est_generic_net_cost'] = df['est_generic_cost'] * (1 - (df['rebate_pct'] / 100.0))
+    
+    est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * dynamic_rate
+    est_generic_net_reimb = (df['est_generic_reimb'] * df['quantity_dispensed']) - est_generic_clawback
+    est_generic_income = est_generic_net_reimb + df['dispensing_fee_gbp'] 
+    
+    est_generic_total_cost = df['est_generic_net_cost'] * df['quantity_dispensed']
+    df['est_generic_margin'] = est_generic_income - est_generic_total_cost
+    
+    df['potential_savings_gbp'] = np.where(df['switch_type'] != 'None', df['est_generic_margin'] - df['margin_gbp'], 0.0)
+    df['potential_savings_gbp'] = np.where(df['potential_savings_gbp'] > 0, df['potential_savings_gbp'], 0.0)
+    
     df['clinical_rationale'] = switch_data.apply(lambda x: x.get('clinical_rationale', '') if isinstance(x, dict) else '')
     df['reference_source'] = switch_data.apply(lambda x: x.get('reference_source', '') if isinstance(x, dict) else '')
     df['clinical_link'] = switch_data.apply(lambda x: x.get('clinical_link', '') if isinstance(x, dict) else '')
     df['clinical_effort'] = switch_data.apply(lambda x: x.get('clinical_effort', 'Uncategorised') if isinstance(x, dict) else 'Uncategorised')
     df['mds_warning'] = switch_data.apply(lambda x: x.get('mds_warning', False) if isinstance(x, dict) else False)
-    
     df['locality_alignment'] = switch_data.apply(lambda x: x.get('locality_alignment', 'Unclassified') if isinstance(x, dict) else 'Unclassified')
     df['incentive_scheme'] = switch_data.apply(lambda x: x.get('incentive_scheme', 'N/A') if isinstance(x, dict) else 'N/A')
-
-    est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * dynamic_rate
-    est_generic_net_reimb = (df['est_generic_reimb'] * df['quantity_dispensed']) - est_generic_clawback
-    est_generic_income = est_generic_net_reimb + df['dispensing_fee_gbp'] 
-    est_generic_total_cost = df['est_generic_cost'] * df['quantity_dispensed']
-    df['est_generic_margin'] = est_generic_income - est_generic_total_cost
-    
-    df['potential_savings_gbp'] = np.where(df['switch_type'] != 'None', df['est_generic_margin'] - df['margin_gbp'], 0.0)
-    df['potential_savings_gbp'] = np.where(df['potential_savings_gbp'] > 0, df['potential_savings_gbp'], 0.0)
 
     grouped = df.groupby('key_drug').agg(
         example_drug_description=('drug_description', 'first'),

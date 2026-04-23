@@ -129,7 +129,8 @@ if disp_file and inv_file:
         active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
         total_lost_vat = final_data.get('lost_vat_gbp', pd.Series([0])).sum()
         
-        monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum() + total_lost_vat
+        # FIX: Removed concession uplift from leakage. It is already in the Net-Net margin.
+        monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + total_lost_vat
         
         optimised_target_margin = current_net_net_margin + (monthly_opp * REALISATION_FACTOR)
         maximum_theoretical_margin = current_net_net_margin + monthly_opp
