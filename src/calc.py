@@ -92,11 +92,6 @@ def get_dispensing_fee(total_items: int) -> float:
 def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None, rebate_dict: dict = None, mds_active: bool = False, concessions_df: pd.DataFrame = None) -> pd.DataFrame:
     df = df.copy()
     if rebate_dict is None: rebate_dict = {}
-    
-    # Defensive column check
-    for expected_col in ['avg_unit_cost', 'invoice_pack_size', 'min_unit_cost']:
-        if expected_col not in df.columns:
-            df[expected_col] = 0.0
             
     if 'bnf_code' not in df.columns: df['bnf_code'] = ''
     df['bnf_code'] = df['bnf_code'].fillna('').astype(str)
@@ -105,9 +100,9 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     
     df['total_units_dispensed'] = df['pack_size'] * df['quantity_dispensed']
     
-    # Use np.where to prevent division by zero errors safely
-    df['actual_cost_per_unit'] = np.where(df['invoice_pack_size'] > 0, df['avg_unit_cost'] / df['invoice_pack_size'], 0.0)
-    df['best_cost_per_unit'] = np.where(df['invoice_pack_size'] > 0, df['min_unit_cost'] / df['invoice_pack_size'], 0.0)
+    # Restore accurate direct cost calculation
+    df['actual_cost_per_unit'] = df['avg_unit_cost'] / df['invoice_pack_size']
+    df['best_cost_per_unit'] = df['min_unit_cost'] / df['invoice_pack_size']
     
     df['acquisition_cost_gbp'] = df['total_units_dispensed'] * df['actual_cost_per_unit']
     df['benchmark_cost_gbp'] = df['total_units_dispensed'] * df['best_cost_per_unit']
@@ -144,7 +139,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
             
     df['concession_price_gbp'] = df['effective_dm_d_code'].map(active_concessions).fillna(0.0)
     
-    # Safe fillna for merged columns
     if 'tariff_price_gbp' not in df.columns: df['tariff_price_gbp'] = 0.0
     if 'tariff_pack_size' not in df.columns: df['tariff_pack_size'] = 1.0
     
@@ -216,7 +210,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['locality_alignment'] = switch_data.apply(lambda x: x.get('locality_alignment', 'Unclassified') if isinstance(x, dict) else 'Unclassified')
     df['incentive_scheme'] = switch_data.apply(lambda x: x.get('incentive_scheme', 'N/A') if isinstance(x, dict) else 'N/A')
 
-    # Final guarantee that all required output columns exist before grouping
     if 'supplier_variance' not in df.columns: df['supplier_variance'] = 0.0
     if 'cheapest_supplier' not in df.columns: df['cheapest_supplier'] = 'Unknown'
     if 'drug_description' not in df.columns: df['drug_description'] = df['clean_drug_name']

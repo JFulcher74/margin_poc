@@ -65,7 +65,6 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
-    # Auto-flush cache to absolutely guarantee a clean schema run
     if 'master_data' in st.session_state and 'potential_savings_gbp' not in st.session_state.master_data.columns:
         st.session_state.clear()
 
@@ -77,7 +76,6 @@ if disp_file and inv_file:
             concessions_df = None
             if conc_file:
                 try:
-                    # Safe reading prevents Pandas throwing KeyErrors if file is malformed
                     concessions_df = pd.read_csv(conc_file, dtype=str)
                 except Exception:
                     concessions_df = pd.DataFrame()
@@ -193,7 +191,7 @@ if disp_file and inv_file:
         st.divider()
 
         st.subheader("Operational Action Board")
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["Dispensary Manager (Critical Losses)", "Clinical Pharmacist (Formulary Switches)", "Purchasing Lead (Procurement Waste)", "🛡️ Price Concessions", "💉 PA / VAT Audit"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚨 Critical Losses", "🔄 Clinical Switches", "🛒 Procurement Waste", "🛡️ Price Concessions", "💉 PA / VAT Audit"])
         
         with tab1:
             loss_makers = final_data[final_data['invoice_margin_gbp'] < 0].copy()
