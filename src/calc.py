@@ -54,6 +54,14 @@ MDS_MAPPING = {
     '28572511000001104': 10.0, '8058211000001101': 15.0, '11417011000001106': 12.5
 }
 
+# Known PA Items (Injectables, Vaccines, Implants)
+KNOWN_PA_DMD_CODES = [
+    '1411111000001103', # Hydroxocobalamin 1mg/1ml
+    '10862711000001106', # Zoladex 3.6mg implant
+    '3371911000001104', # Depo-Provera 150mg/1ml
+    '15569411000001107' # Prostap 3 DCS 11.25mg
+]
+
 def get_clawback_rate(total_monthly_basic_price: float) -> float:
     if total_monthly_basic_price <= 2000.00: return 0.0317
     elif total_monthly_basic_price <= 4000.00: return 0.0593
@@ -138,11 +146,21 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clawback_deduction_gbp'] = df['gross_drug_reimbursed_gbp'] * df['clawback_rate']
     df['net_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'] - df['clawback_deduction_gbp']
     
+    # PA & VAT Audit Logic
+    if 'pa_flag' not in df.columns:
+        df['pa_flag'] = 'N'
+    df['pa_flag'] = df['pa_flag'].fillna('N').str.upper()
+    
+    df['is_known_pa'] = df['effective_dm_d_code'].isin(KNOWN_PA_DMD_CODES) | df['clean_drug_name'].str.contains('vaccine|injection|implant|zoladex|depo-provera', case=False, na=False)
+    df['missed_pa_claim'] = df['is_known_pa'] & (df['pa_flag'] != 'Y')
+    
     total_prescriptions = len(df)
     dynamic_fee = get_dispensing_fee(total_prescriptions)
     
     df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', 0.0, dynamic_fee)
     df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
+    df['lost_vat_gbp'] = np.where(df['missed_pa_claim'], df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
+    
     df['net_income_gbp'] = df['net_drug_reimbursed_gbp'] + df['dispensing_fee_gbp'] + df['vat_allowance_gbp']
     
     df['invoice_margin_gbp'] = df['net_income_gbp'] - df['acquisition_cost_gbp']
@@ -161,7 +179,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clinical_effort'] = switch_data.apply(lambda x: x.get('clinical_effort', 'Uncategorised') if isinstance(x, dict) else 'Uncategorised')
     df['mds_warning'] = switch_data.apply(lambda x: x.get('mds_warning', False) if isinstance(x, dict) else False)
     
-    # New Locality Alignment Fields
     df['locality_alignment'] = switch_data.apply(lambda x: x.get('locality_alignment', 'Unclassified') if isinstance(x, dict) else 'Unclassified')
     df['incentive_scheme'] = switch_data.apply(lambda x: x.get('incentive_scheme', 'N/A') if isinstance(x, dict) else 'N/A')
 
@@ -184,6 +201,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         net_drug_reimbursed_gbp=('net_drug_reimbursed_gbp', 'sum'),
         dispensing_fees_earned_gbp=('dispensing_fee_gbp', 'sum'),
         vat_allowance_gbp=('vat_allowance_gbp', 'sum'),
+        lost_vat_gbp=('lost_vat_gbp', 'sum'),
+        missed_pa_claim=('missed_pa_claim', 'max'),
         net_income_gbp=('net_income_gbp', 'sum'),
         acquisition_cost_gbp=('acquisition_cost_gbp', 'sum'),
         wholesaler_rebate_gbp=('wholesaler_rebate_gbp', 'sum'),

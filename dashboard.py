@@ -63,7 +63,7 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
-    if 'master_data' in st.session_state and 'locality_alignment' not in st.session_state.master_data.columns:
+    if 'master_data' in st.session_state and 'lost_vat_gbp' not in st.session_state.master_data.columns:
         del st.session_state['master_data']
 
     if 'master_data' not in st.session_state:
@@ -128,7 +128,9 @@ if disp_file and inv_file:
         
         REALISATION_FACTOR = 0.85
         active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
-        monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
+        total_lost_vat = final_data.get('lost_vat_gbp', pd.Series([0])).sum()
+        
+        monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum() + total_lost_vat
         annual_run_rate = monthly_opp * 12
 
         st.subheader("Financial Performance & Cash Flow")
@@ -151,7 +153,7 @@ if disp_file and inv_file:
         st.divider()
 
         st.subheader("Operational Action Board")
-        tab1, tab2, tab3, tab4 = st.tabs(["🚨 Critical Losses", "🔄 Clinical Switches", "🛒 Procurement Waste", "🛡️ Price Concessions"])
+        tab1, tab2, tab3, tab4, tab5 = st.tabs(["🚨 Critical Losses", "🔄 Clinical Switches", "🛒 Procurement Waste", "🛡️ Price Concessions", "💉 PA / VAT Audit"])
         
         with tab1:
             loss_makers = final_data[final_data['invoice_margin_gbp'] < 0].copy()
@@ -163,13 +165,10 @@ if disp_file and inv_file:
         with tab2:
             if 'potential_savings_gbp' in final_data.columns and not final_data[final_data['potential_savings_gbp'] > 0.0].empty:
                 switch_df = final_data[final_data['potential_savings_gbp'] > 0.0].copy()
-                
                 st.markdown("Prioritise switches that align with the local ICB Formulary to protect Prescribing Incentive payments.")
                 st.dataframe(switch_df[['example_drug_description', 'suggested_drug', 'switch_type', 'locality_alignment', 'potential_savings_gbp']].sort_values('potential_savings_gbp', ascending=False), hide_index=True, use_container_width=True)
-                
                 for index, row in switch_df.sort_values('potential_savings_gbp', ascending=False).iterrows():
                     with st.expander(f"Review Switch: {row['example_drug_description']} to {row['suggested_drug']}"):
-                        
                         colA, colB = st.columns(2)
                         with colA:
                             st.markdown(f"**Implementation:** {row.get('clinical_effort', 'Uncategorised')}")
@@ -179,77 +178,57 @@ if disp_file and inv_file:
                             color = "🟢" if "Green" in alignment else "🔴" if "Grey" in alignment else "⚪"
                             st.markdown(f"**ICB Alignment:** {color} {alignment}")
                             st.markdown(f"**Incentive Impact:** {row.get('incentive_scheme', 'N/A')}")
-                            
                         if mds_active and row.get('mds_warning', False): 
                             st.warning("MDS Alert: Ensure this switch does not impact rebate thresholds.")
             else: st.success("No immediate switch opportunities identified.")
 
         with tab3:
             st.markdown("Identify purchasing waste. If the cheapest supplier was out of stock, check the **OOS** box to exclude it from your performance metrics.")
-            
             leakage_mask = final_data['maverick_leakage_gbp'] > 0
             if leakage_mask.any():
                 leakage_df = final_data[leakage_mask].copy()
-                
                 active_waste = leakage_df[~leakage_df['is_oos']]
                 oos_audit = leakage_df[leakage_df['is_oos']]
-                
                 if not active_waste.empty:
                     st.write("**Active Procurement Waste**")
                     edited_waste = st.data_editor(
                         active_waste[['is_oos', 'example_drug_description', 'total_quantity_packs', 'acquisition_cost_gbp', 'cheapest_supplier', 'maverick_leakage_gbp']],
-                        column_config={
-                            "is_oos": st.column_config.CheckboxColumn("Mark OOS", help="Check if the cheapest supplier was out of stock"),
-                            "example_drug_description": "Product",
-                            "acquisition_cost_gbp": "Actual Spend (£)",
-                            "cheapest_supplier": "Cheapest Supplier",
-                            "maverick_leakage_gbp": "Waste (£)"
-                        },
+                        column_config={"is_oos": st.column_config.CheckboxColumn("Mark OOS", help="Check if the cheapest supplier was out of stock"), "example_drug_description": "Product", "acquisition_cost_gbp": "Actual Spend (£)", "cheapest_supplier": "Cheapest Supplier", "maverick_leakage_gbp": "Waste (£)"},
                         disabled=["example_drug_description", "total_quantity_packs", "acquisition_cost_gbp", "cheapest_supplier", "maverick_leakage_gbp"],
-                        hide_index=True,
-                        use_container_width=True,
-                        key="waste_editor"
+                        hide_index=True, use_container_width=True, key="waste_editor"
                     )
-                    
                     changed_rows = edited_waste[edited_waste['is_oos'] == True]
                     if not changed_rows.empty:
-                        for index in changed_rows.index:
-                            st.session_state.master_data.loc[index, 'is_oos'] = True
+                        for index in changed_rows.index: st.session_state.master_data.loc[index, 'is_oos'] = True
                         st.rerun()
-                else:
-                    st.success("No active procurement leakage detected.")
-                
+                else: st.success("No active procurement leakage detected.")
                 if not oos_audit.empty:
                     st.divider()
                     st.write("**Supply Chain Audit (OOS Items)**")
-                    
                     edited_oos = st.data_editor(
                         oos_audit[['is_oos', 'example_drug_description', 'cheapest_supplier', 'maverick_leakage_gbp']],
-                        column_config={
-                            "is_oos": st.column_config.CheckboxColumn("OOS", help="Uncheck to return to Active Waste"),
-                            "example_drug_description": "Product",
-                            "cheapest_supplier": "Unavailable Supplier",
-                            "maverick_leakage_gbp": "Forgiven Waste (£)"
-                        },
+                        column_config={"is_oos": st.column_config.CheckboxColumn("OOS", help="Uncheck to return to Active Waste"), "example_drug_description": "Product", "cheapest_supplier": "Unavailable Supplier", "maverick_leakage_gbp": "Forgiven Waste (£)"},
                         disabled=["example_drug_description", "cheapest_supplier", "maverick_leakage_gbp"],
-                        hide_index=True,
-                        use_container_width=True,
-                        key="oos_editor"
+                        hide_index=True, use_container_width=True, key="oos_editor"
                     )
-                    
                     restored_rows = edited_oos[edited_oos['is_oos'] == False]
                     if not restored_rows.empty:
-                        for index in restored_rows.index:
-                            st.session_state.master_data.loc[index, 'is_oos'] = False
+                        for index in restored_rows.index: st.session_state.master_data.loc[index, 'is_oos'] = False
                         st.rerun()
-            else:
-                st.success("No procurement leakage detected in this dataset.")
+            else: st.success("No procurement leakage detected in this dataset.")
 
         with tab4:
             if 'concession_uplift_gbp' in final_data.columns and not final_data[final_data['concession_uplift_gbp'] > 0].empty:
                 st.metric("Total Concession Uplift", f"£{final_data['concession_uplift_gbp'].sum():,.2f}")
                 st.dataframe(final_data[final_data['concession_uplift_gbp'] > 0][['example_drug_description', 'total_quantity_packs', 'acquisition_cost_gbp', 'margin_gbp', 'concession_uplift_gbp']].sort_values('concession_uplift_gbp', ascending=False).style.background_gradient(subset=['concession_uplift_gbp'], cmap='Blues').format(precision=2), use_container_width=True, hide_index=True)
             else: st.info("No price concessions identified.")
+            
+        with tab5:
+            if 'lost_vat_gbp' in final_data.columns and not final_data[final_data['lost_vat_gbp'] > 0].empty:
+                st.error(f"⚠️ £{total_lost_vat:,.2f} of VAT was not reclaimed due to missing PA flags.")
+                st.markdown("The following items are typically administered by clinicians but were processed as standard prescriptions. Update your clinical system to flag these as Personally Administered (PA) to recover the 20% VAT allowance.")
+                st.dataframe(final_data[final_data['lost_vat_gbp'] > 0][['example_drug_description', 'total_quantity_packs', 'gross_drug_reimbursed_gbp', 'lost_vat_gbp']].sort_values('lost_vat_gbp', ascending=False).style.background_gradient(subset=['lost_vat_gbp'], cmap='Oranges').format(precision=2), use_container_width=True, hide_index=True)
+            else: st.success("No VAT leakage detected. All known PA items were flagged correctly.")
 else:
     st.write("---")
     st.info("👋 Welcome. Please upload the practice dispensing and invoice files to generate your margin report.")
