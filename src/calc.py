@@ -61,6 +61,23 @@ def get_clawback_rate(total_monthly_basic_price: float) -> float:
     elif total_monthly_basic_price <= 24000.00: return 0.1103
     else: return 0.1118
 
+def get_dispensing_fee(total_items: int) -> float:
+    """Returns the most recent NHS SFE dispensing fee in GBP based on monthly volume."""
+    if total_items <= 460: return 2.58
+    elif total_items <= 575: return 2.55
+    elif total_items <= 690: return 2.52
+    elif total_items <= 805: return 2.49
+    elif total_items <= 920: return 2.46
+    elif total_items <= 1035: return 2.44
+    elif total_items <= 1495: return 2.40
+    elif total_items <= 1955: return 2.36
+    elif total_items <= 2415: return 2.32
+    elif total_items <= 2875: return 2.29
+    elif total_items <= 3335: return 2.25
+    elif total_items <= 3795: return 2.22
+    elif total_items <= 4600: return 2.19
+    else: return 2.11
+
 def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.DataFrame, override_basic_price: float = None) -> pd.DataFrame:
     df = df.copy()
     
@@ -91,7 +108,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['gross_drug_reimbursed_gbp'] = df['total_units_dispensed'] * df['tariff_per_unit']
     df['gross_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'].fillna(0.0)
     
-    # Core Logic Update: Automatic Basic Price calculation
     if override_basic_price is not None:
         calc_basic_price = override_basic_price
     else:
@@ -104,7 +120,11 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['clawback_deduction_gbp'] = df['gross_drug_reimbursed_gbp'] * df['clawback_rate']
     df['net_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'] - df['clawback_deduction_gbp']
     
-    df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', 0.0, 2.18)
+    # Core Logic Update: Dynamic Dispensing Fee Calculation
+    total_prescriptions = len(df)
+    dynamic_fee = get_dispensing_fee(total_prescriptions)
+    
+    df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', 0.0, dynamic_fee)
     df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
     
     df['net_income_gbp'] = df['net_drug_reimbursed_gbp'] + df['dispensing_fee_gbp'] + df['vat_allowance_gbp']
@@ -161,8 +181,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     grouped['confidence'] = grouped['confidence_list'].apply(get_worst_confidence)
     grouped.drop(columns=['confidence_list'], inplace=True)
     
-    # Store metadata for dashboard display
     grouped['applied_basic_price'] = calc_basic_price
     grouped['applied_clawback_rate'] = dynamic_rate
+    grouped['applied_dispensing_fee'] = dynamic_fee
 
     return grouped
