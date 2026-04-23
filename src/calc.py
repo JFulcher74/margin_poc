@@ -93,6 +93,11 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df = df.copy()
     if rebate_dict is None: rebate_dict = {}
     
+    # Defensive column check
+    for expected_col in ['avg_unit_cost', 'invoice_pack_size', 'min_unit_cost']:
+        if expected_col not in df.columns:
+            df[expected_col] = 0.0
+            
     if 'bnf_code' not in df.columns: df['bnf_code'] = ''
     df['bnf_code'] = df['bnf_code'].fillna('').astype(str)
     df['bnf_chapter_code'] = df['bnf_code'].str[:2]
@@ -100,8 +105,10 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     
     df['total_units_dispensed'] = df['pack_size'] * df['quantity_dispensed']
     
-    df['actual_cost_per_unit'] = df['avg_unit_cost'] / df['invoice_pack_size']
-    df['best_cost_per_unit'] = df['min_unit_cost'] / df['invoice_pack_size']
+    # Use np.where to prevent division by zero errors safely
+    df['actual_cost_per_unit'] = np.where(df['invoice_pack_size'] > 0, df['avg_unit_cost'] / df['invoice_pack_size'], 0.0)
+    df['best_cost_per_unit'] = np.where(df['invoice_pack_size'] > 0, df['min_unit_cost'] / df['invoice_pack_size'], 0.0)
+    
     df['acquisition_cost_gbp'] = df['total_units_dispensed'] * df['actual_cost_per_unit']
     df['benchmark_cost_gbp'] = df['total_units_dispensed'] * df['best_cost_per_unit']
     df['acquisition_cost_gbp'] = df['acquisition_cost_gbp'].fillna(0.0)
@@ -116,7 +123,7 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         
     df['wholesaler_rebate_gbp'] = df['acquisition_cost_gbp'] * (df['rebate_pct'] / 100.0)
     
-    df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
+    df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df.get('matched_dm_d_code', ''))
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
     
     if mds_active:
@@ -132,11 +139,18 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     active_concessions = CONCESSIONS_MAPPING.copy()
     if concessions_df is not None and not concessions_df.empty:
         if 'dm_d_code' in concessions_df.columns and 'concession_price' in concessions_df.columns:
-            uploaded_concessions = dict(zip(concessions_df['dm_d_code'].astype(str), pd.to_numeric(concessions_df['concession_price'], errors='coerce')))
+            uploaded_concessions = dict(zip(concessions_df['dm_d_code'].astype(str), pd.to_numeric(concessions_df['concession_price'], errors='coerce').fillna(0.0)))
             active_concessions.update(uploaded_concessions)
             
     df['concession_price_gbp'] = df['effective_dm_d_code'].map(active_concessions).fillna(0.0)
+    
+    # Safe fillna for merged columns
+    if 'tariff_price_gbp' not in df.columns: df['tariff_price_gbp'] = 0.0
+    if 'tariff_pack_size' not in df.columns: df['tariff_pack_size'] = 1.0
+    
     df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(0.0)
+    df['tariff_pack_size'] = df['tariff_pack_size'].fillna(1.0)
+    
     df['final_reimbursement_price_gbp'] = np.maximum(df['tariff_price_gbp'], df['concession_price_gbp'])
     df['concession_uplift_gbp'] = np.where(df['concession_price_gbp'] > df['tariff_price_gbp'], ((df['concession_price_gbp'] - df['tariff_price_gbp']) / df['tariff_pack_size']) * df['total_units_dispensed'], 0.0)
     
@@ -147,7 +161,7 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     calc_basic_price = override_basic_price if override_basic_price is not None else df['gross_drug_reimbursed_gbp'].sum()
     dynamic_rate = get_clawback_rate(calc_basic_price)
     
-    df['is_dnd'] = df['effective_dm_d_code'].isin(dnd_df['dm_d_code'])
+    df['is_dnd'] = df['effective_dm_d_code'].isin(dnd_df['dm_d_code']) if 'dm_d_code' in dnd_df.columns else False
     df['clawback_rate'] = np.where(df['is_dnd'], 0.0, dynamic_rate)
     df['clawback_deduction_gbp'] = df['gross_drug_reimbursed_gbp'] * df['clawback_rate']
     df['net_drug_reimbursed_gbp'] = df['gross_drug_reimbursed_gbp'] - df['clawback_deduction_gbp']
@@ -156,6 +170,9 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         df['pa_flag'] = 'N'
     df['pa_flag'] = df['pa_flag'].fillna('N').str.upper()
     
+    if 'clean_drug_name' not in df.columns:
+        df['clean_drug_name'] = ''
+        
     df['is_known_pa'] = df['effective_dm_d_code'].isin(KNOWN_PA_DMD_CODES) | df['clean_drug_name'].str.contains('vaccine|injection|implant|zoladex|depo-provera', case=False, na=False)
     df['missed_pa_claim'] = df['is_known_pa'] & (df['pa_flag'] != 'Y')
     
@@ -199,6 +216,11 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['locality_alignment'] = switch_data.apply(lambda x: x.get('locality_alignment', 'Unclassified') if isinstance(x, dict) else 'Unclassified')
     df['incentive_scheme'] = switch_data.apply(lambda x: x.get('incentive_scheme', 'N/A') if isinstance(x, dict) else 'N/A')
 
+    # Final guarantee that all required output columns exist before grouping
+    if 'supplier_variance' not in df.columns: df['supplier_variance'] = 0.0
+    if 'cheapest_supplier' not in df.columns: df['cheapest_supplier'] = 'Unknown'
+    if 'drug_description' not in df.columns: df['drug_description'] = df['clean_drug_name']
+
     grouped = df.groupby('key_drug').agg(
         example_drug_description=('drug_description', 'first'),
         therapeutic_group=('therapeutic_group', 'first'),
@@ -232,11 +254,12 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
         locality_alignment=('locality_alignment', 'first'),
         incentive_scheme=('incentive_scheme', 'first'),
         potential_savings_gbp=('potential_savings_gbp', 'sum'),
-        confidence_list=('confidence', list)
+        confidence_list=('confidence', list) if 'confidence' in df.columns else ('key_drug', lambda x: [1.0])
     ).reset_index()
 
-    grouped['confidence'] = grouped['confidence_list'].apply(get_worst_confidence)
-    grouped.drop(columns=['confidence_list'], inplace=True)
+    grouped['confidence'] = grouped['confidence_list'].apply(get_worst_confidence) if 'confidence_list' in grouped.columns else 1.0
+    if 'confidence_list' in grouped.columns:
+        grouped.drop(columns=['confidence_list'], inplace=True)
     
     grouped['applied_basic_price'] = calc_basic_price
     grouped['applied_clawback_rate'] = dynamic_rate

@@ -65,8 +65,9 @@ with st.sidebar:
         st.rerun()
 
 if disp_file and inv_file:
-    if 'master_data' in st.session_state and 'lost_vat_gbp' not in st.session_state.master_data.columns:
-        del st.session_state['master_data']
+    # Auto-flush cache to absolutely guarantee a clean schema run
+    if 'master_data' in st.session_state and 'potential_savings_gbp' not in st.session_state.master_data.columns:
+        st.session_state.clear()
 
     if 'master_data' not in st.session_state:
         with st.spinner("Calculating NHS Reimbursement & Leakage..."):
@@ -75,11 +76,16 @@ if disp_file and inv_file:
             
             concessions_df = None
             if conc_file:
-                concessions_df = pd.read_csv(conc_file, dtype={'dm_d_code': str})
+                try:
+                    # Safe reading prevents Pandas throwing KeyErrors if file is malformed
+                    concessions_df = pd.read_csv(conc_file, dtype=str)
+                except Exception:
+                    concessions_df = pd.DataFrame()
                 
             tariff_raw = pd.read_csv("Part VIIIA April 2026.csv", dtype=str)
             if 'VMPP Snomed Code' not in tariff_raw.columns:
                 tariff_raw = pd.read_csv("Part VIIIA April 2026.csv", skiprows=2, dtype=str)
+                
             dnd_df = pd.read_csv("dnd_mock.csv", dtype={'dm_d_code': str})
 
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
