@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import random
 from src.normalise import normalise_dispensing, normalise_invoices, normalise_tariff
 from src.match import match_records
@@ -122,31 +123,58 @@ if disp_file and inv_file:
         gbp_cols = [col for col in final_data.columns if 'gbp' in col]
         final_data[gbp_cols] = final_data[gbp_cols].round(2)
 
-        current_invoice_margin = final_data['invoice_margin_gbp'].sum()
         current_net_net_margin = final_data['margin_gbp'].sum()
-        total_outstanding_rebates = final_data['total_rebates_gbp'].sum()
         
         REALISATION_FACTOR = 0.85
         active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
         total_lost_vat = final_data.get('lost_vat_gbp', pd.Series([0])).sum()
         
         monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum() + total_lost_vat
-        annual_run_rate = monthly_opp * 12
+        
+        optimised_target_margin = current_net_net_margin + (monthly_opp * REALISATION_FACTOR)
+        maximum_theoretical_margin = current_net_net_margin + monthly_opp
 
-        st.subheader("Financial Performance & Cash Flow")
+        st.subheader("Financial Performance & Growth Potential")
         col1, col2, col3, col4 = st.columns(4)
-        with col1: st.metric("Invoice Margin (Cash Flow)", f"£{current_invoice_margin:,.2f}")
-        with col2: st.metric("Total Outstanding Rebates", f"£{total_outstanding_rebates:,.2f}")
-        with col3: st.metric("Net-Net Margin (Profitability)", f"£{current_net_net_margin:,.2f}")
-        with col4: st.metric("Projected Annual Opportunity", f"£{annual_run_rate * REALISATION_FACTOR:,.2f}")
+        with col1: st.metric("Current Monthly Profit", f"£{current_net_net_margin:,.2f}")
+        with col2: st.metric("Identified Monthly Leakage", f"£{monthly_opp:,.2f}")
+        with col3: st.metric("Optimised Target Profit (85%)", f"£{optimised_target_margin:,.2f}")
+        with col4: st.metric("Theoretical Maximum Profit", f"£{maximum_theoretical_margin:,.2f}")
         
         st.divider()
 
-        st.subheader("Margin Trajectory & Total Potential")
+        st.subheader("Profit Trajectory & Total Potential")
         historical_df = fetch_mock_historical_data(current_net_net_margin, monthly_opp)
-        fig_trend = px.area(historical_df, x='Month', y=['Realised Margin', 'Unrealised Opportunity'], markers=True, color_discrete_map={"Realised Margin": "#2ca02c", "Unrealised Opportunity": "#ff7f0e"})
-        fig_trend.update_traces(line_shape='spline')
-        fig_trend.update_layout(height=280, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', xaxis_title="", yaxis_title="", legend_title_text="", legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5), margin=dict(l=0, r=0, t=20, b=0))
+        
+        historical_df['Realistic Target'] = historical_df['Realised Margin'] + (historical_df['Unrealised Opportunity'] * REALISATION_FACTOR)
+        historical_df['Maximum Potential'] = historical_df['Realised Margin'] + historical_df['Unrealised Opportunity']
+
+        fig_trend = go.Figure()
+        
+        fig_trend.add_trace(go.Scatter(
+            x=historical_df['Month'], y=historical_df['Realised Margin'],
+            mode='lines+markers', name='Current Profit',
+            fill='tozeroy', line=dict(color='#2ca02c', width=3)
+        ))
+        
+        fig_trend.add_trace(go.Scatter(
+            x=historical_df['Month'], y=historical_df['Realistic Target'],
+            mode='lines+markers', name=f'Realistic Target ({REALISATION_FACTOR * 100:.0f}%)',
+            fill='tonexty', line=dict(color='#ff7f0e', width=2)
+        ))
+        
+        fig_trend.add_trace(go.Scatter(
+            x=historical_df['Month'], y=historical_df['Maximum Potential'],
+            mode='lines', name='Theoretical Maximum (100%)',
+            line=dict(color='#d62728', width=2, dash='dash')
+        ))
+
+        fig_trend.update_layout(
+            height=320, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+            xaxis_title="", yaxis_title="", 
+            legend=dict(orientation="h", yanchor="bottom", y=1.05, xanchor="center", x=0.5),
+            margin=dict(l=0, r=0, t=20, b=0)
+        )
         fig_trend.update_yaxes(showgrid=True, gridcolor='rgba(0,0,0,0.05)', tickprefix="£")
         fig_trend.update_xaxes(showgrid=False)
         st.plotly_chart(fig_trend, use_container_width=True, config={'displayModeBar': False})
