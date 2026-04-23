@@ -74,6 +74,9 @@ if disp_file and inv_file:
 
             matched = match_records(normalise_dispensing(disp_df), normalise_invoices(inv_df))
             st.session_state.master_data = calculate_metrics(matched, normalise_tariff(tariff_raw), dnd_df, override_price, rebate_dict)
+            
+            # Initialise the OOS tracking column
+            st.session_state.master_data['is_oos'] = False
 
     df = st.session_state.master_data.copy()
     
@@ -117,7 +120,11 @@ if disp_file and inv_file:
 
         current_margin = final_data['margin_gbp'].sum()
         REALISATION_FACTOR = 0.85
-        monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + final_data.get('maverick_leakage_gbp', pd.Series([0])).sum() + final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
+        
+        # Recalculate Active Leakage excluding OOS items
+        active_leakage_gbp = final_data[~final_data['is_oos']]['maverick_leakage_gbp'].sum()
+        monthly_opp = final_data.get('potential_savings_gbp', pd.Series([0])).sum() + active_leakage_gbp + final_data.get('concession_uplift_gbp', pd.Series([0])).sum()
+        
         annual_run_rate = monthly_opp * 12
         realised_annual_projection = annual_run_rate * REALISATION_FACTOR
 
@@ -163,9 +170,65 @@ if disp_file and inv_file:
             else: st.success("No immediate switch opportunities identified.")
 
         with tab3:
-            if 'maverick_leakage_gbp' in final_data.columns and not final_data[final_data['maverick_leakage_gbp'] > 0].empty:
-                st.dataframe(final_data[final_data['maverick_leakage_gbp'] > 0][['example_drug_description', 'total_quantity_packs', 'acquisition_cost_gbp', 'cheapest_supplier', 'maverick_leakage_gbp']].sort_values('maverick_leakage_gbp', ascending=False).style.background_gradient(subset=['maverick_leakage_gbp'], cmap='Oranges').format(precision=2), use_container_width=True, hide_index=True)
-            else: st.success("No procurement leakage detected.")
+            st.markdown("Identify purchasing waste. If the cheapest supplier was out of stock, check the **OOS** box to exclude it from your performance metrics.")
+            
+            leakage_mask = final_data['maverick_leakage_gbp'] > 0
+            if leakage_mask.any():
+                leakage_df = final_data[leakage_mask].copy()
+                
+                active_waste = leakage_df[~leakage_df['is_oos']]
+                oos_audit = leakage_df[leakage_df['is_oos']]
+                
+                if not active_waste.empty:
+                    st.write("**Active Procurement Waste**")
+                    edited_waste = st.data_editor(
+                        active_waste[['is_oos', 'example_drug_description', 'total_quantity_packs', 'acquisition_cost_gbp', 'cheapest_supplier', 'maverick_leakage_gbp']],
+                        column_config={
+                            "is_oos": st.column_config.CheckboxColumn("Mark OOS", help="Check if the cheapest supplier was out of stock"),
+                            "example_drug_description": "Product",
+                            "acquisition_cost_gbp": "Actual Spend (£)",
+                            "cheapest_supplier": "Cheapest Supplier",
+                            "maverick_leakage_gbp": "Waste (£)"
+                        },
+                        disabled=["example_drug_description", "total_quantity_packs", "acquisition_cost_gbp", "cheapest_supplier", "maverick_leakage_gbp"],
+                        hide_index=True,
+                        use_container_width=True,
+                        key="waste_editor"
+                    )
+                    
+                    changed_rows = edited_waste[edited_waste['is_oos'] == True]
+                    if not changed_rows.empty:
+                        for index in changed_rows.index:
+                            st.session_state.master_data.loc[index, 'is_oos'] = True
+                        st.rerun()
+                else:
+                    st.success("No active procurement leakage detected.")
+                
+                if not oos_audit.empty:
+                    st.divider()
+                    st.write("**Supply Chain Audit (OOS Items)**")
+                    
+                    edited_oos = st.data_editor(
+                        oos_audit[['is_oos', 'example_drug_description', 'cheapest_supplier', 'maverick_leakage_gbp']],
+                        column_config={
+                            "is_oos": st.column_config.CheckboxColumn("OOS", help="Uncheck to return to Active Waste"),
+                            "example_drug_description": "Product",
+                            "cheapest_supplier": "Unavailable Supplier",
+                            "maverick_leakage_gbp": "Forgiven Waste (£)"
+                        },
+                        disabled=["example_drug_description", "cheapest_supplier", "maverick_leakage_gbp"],
+                        hide_index=True,
+                        use_container_width=True,
+                        key="oos_editor"
+                    )
+                    
+                    restored_rows = edited_oos[edited_oos['is_oos'] == False]
+                    if not restored_rows.empty:
+                        for index in restored_rows.index:
+                            st.session_state.master_data.loc[index, 'is_oos'] = False
+                        st.rerun()
+            else:
+                st.success("No procurement leakage detected in this dataset.")
 
         with tab4:
             if 'concession_uplift_gbp' in final_data.columns and not final_data[final_data['concession_uplift_gbp'] > 0].empty:
