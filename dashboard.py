@@ -17,7 +17,7 @@ def fetch_mock_historical_data(current_margin, current_opportunity):
 st.set_page_config(page_title="MarginGuard AI | Practice Analytics", layout="wide", page_icon="🏦")
 st.markdown("<style>.metric-container { background-color: #f0f2f6; padding: 1.5rem; border-radius: 0.5rem; } .stDataFrame [data-testid='stTable'] td:nth-child(n+3) { text-align: right; }</style>", unsafe_allow_html=True)
 
-st.title("🏦 MarginGuard AI")
+st.title("🏦 RightMed AI")
 st.caption("Commercial Intelligence for Dispensing GP Practices")
 
 def reset_data():
