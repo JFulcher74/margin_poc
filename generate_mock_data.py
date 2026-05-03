@@ -1,93 +1,168 @@
 import pandas as pd
+import numpy as np
 import random
+from datetime import datetime, timedelta
 
-# (Name, dm+d, BNF, pack_size, tariff_pence, is_brand)
-DRUG_LIBRARY = [
-    # --- HIGH VALUE TARGETS (The "Hooks" in your SWITCH_MAPPING) ---
-    ("Edoxaban 60mg tablets", "28572511000001104", "0208020AA", 28, 4900, True),
-    ("Lipitor 20mg tablets", "8058211000001101", "0212010B0", 28, 2464, True),
-    ("Nexium 20mg gastro-resistant tablets", "11417011000001106", "0103050P0", 28, 1850, True),
+def build_drug_catalog():
+    """Generates a realistic catalogue of ~145 UK Primary Care Drugs."""
+    catalog = []
     
-    # --- TOP VOLUME GENERICS ---
-    ("Atorvastatin 20mg tablets", "9474711000001109", "0212010B0", 28, 98, False),
-    ("Amlodipine 5mg tablets", "14188111000001100", "0206020A0", 28, 85, False),
-    ("Omeprazole 20mg gastro-resistant capsules", "17603511000001107", "0103050P0", 28, 112, False),
-    ("Lansoprazole 30mg gastro-resistant capsules", "13768511000001107", "0103050L0", 28, 115, False),
-    ("Levothyroxine 50microgram tablets", "2201211000001104", "0602010V0", 28, 110, False),
-    ("Ramipril 5mg capsules", "12140411000001101", "0205051R0", 28, 105, False),
-    ("Bisoprolol 2.5mg tablets", "1157411000001105", "0204000C0", 28, 108, False),
-    ("Sertraline 50mg tablets", "15152011000001109", "0403030Q0", 28, 135, False),
-    ("Metformin 500mg tablets", "31782211000001102", "0601022B0", 84, 210, False),
-    ("Salbutamol 100micrograms/dose inhaler", "3324011000001108", "0301011R0", 200, 150, False),
-    ("Furosemide 40mg tablets", "1261511000001107", "0202020F0", 28, 92, False),
-    ("Clopidogrel 75mg tablets", "14389111000001108", "0209000C0", 28, 125, False),
-    ("Citalopram 20mg tablets", "14588111000001105", "0403030C0", 28, 118, False),
-    ("Mirtazapine 30mg tablets", "15456111000001106", "0403030N0", 28, 350, False),
-    ("Losartan 50mg tablets", "15132111000001106", "0205052M0", 28, 140, False),
-    ("Amitriptyline 10mg tablets", "1172111000001102", "0403010A0", 28, 95, False),
-    ("Aspirin 75mg dispersible tablets", "1182211000001108", "0209000A0", 28, 82, False),
-    ("Co-codamol 30mg/500mg tablets", "18567111000001100", "0407010C0", 30, 245, False),
-    ("Gabapentin 300mg capsules", "14920111000001101", "0408010G0", 100, 450, False),
-    ("Nitrofurantoin 100mg m/r capsules", "15901111000001107", "0504030R0", 30, 520, False),
-    ("Fluoxetine 20mg capsules", "14833111000001100", "0403030F0", 30, 155, False),
-    ("Naproxen 250mg tablets", "15762111000001100", "1001010P0", 28, 195, False),
-    ("Gliclazide 80mg tablets", "14954111000001109", "0601021L0", 28, 145, False)
-]
+    # Standard Generics (Base Name, Base Price)
+    generics = [
+        ("Atorvastatin", 1.05), ("Omeprazole", 0.90), ("Amlodipine", 0.85),
+        ("Ramipril", 1.20), ("Metformin", 1.50), ("Levothyroxine", 0.95),
+        ("Bisoprolol", 1.10), ("Sertraline", 1.30), ("Lansoprazole", 1.15),
+        ("Losartan", 1.40), ("Citalopram", 1.25), ("Simvastatin", 0.90),
+        ("Clopidogrel", 1.45), ("Fluoxetine", 1.15), ("Naproxen", 1.80),
+        ("Pregabalin", 2.10), ("Gabapentin", 2.20), ("Amitriptyline", 1.05)
+    ]
+    
+    # Expand generics by dosage
+    dmd_counter = 3970001100000000
+    for name, price in generics:
+        for dose, multiplier in [("10mg", 1.0), ("20mg", 1.2), ("40mg", 1.8), ("80mg", 2.5)]:
+            dmd_counter += 17
+            catalog.append({
+                "Drug_Name": f"{name} {dose} tablets",
+                "dmd_Code": str(dmd_counter),
+                "Tariff_Price": round(price * multiplier, 2),
+                "Pack_Size": 28,
+                "Is_PA": 0,
+                "Category": "Generic"
+            })
 
-# Dynamically fill to 100 drugs to ensure data density
-while len(DRUG_LIBRARY) < 100:
-    base = random.choice(DRUG_LIBRARY[3:]) 
-    DRUG_LIBRARY.append((f"{base[0]} (Alt Dose)", base[1], base[2], base[3], base[4] + random.randint(-10, 10), False))
+    # High Cost & Branded Items
+    speciality = [
+        ("Apixaban 5mg tablets", 26.50, 56),
+        ("Rivaroxaban 20mg tablets", 36.00, 28),
+        ("Edoxaban 60mg tablets", 40.00, 28),
+        ("Fostair 100/6 dose inhaler", 29.32, 1),
+        ("Symbicort 200/6 Turbohaler", 38.00, 1),
+        ("Captopril 50mg tablets", 38.50, 56), # Volatile Concession
+        ("Domperidone 1mg/ml suspension", 92.00, 1) # Volatile Concession
+    ]
+    for name, price, pack in speciality:
+        dmd_counter += 17
+        catalog.append({
+            "Drug_Name": name, "dmd_Code": str(dmd_counter),
+            "Tariff_Price": price, "Pack_Size": pack,
+            "Is_PA": 0, "Category": "Branded"
+        })
 
-# 1. Generate Dispensing File (5000 items)
-disp_list = []
-for i in range(5000):
-    # Weighting: 10% chance to pick a high-value branded switch
-    if random.random() < 0.10:
-        drug = random.choice(DRUG_LIBRARY[:3])
-    else:
-        drug = random.choice(DRUG_LIBRARY)
+    # Personally Administered (PA) Items
+    pa_items = [
+        ("Hydroxocobalamin 1mg/1ml injection", 12.50, 1), # B12
+        ("Zoladex 10.8mg implant", 235.00, 1),
+        ("Zoladex 3.6mg implant", 70.00, 1),
+        ("Depo-Provera 150mg/1ml injection", 6.50, 1),
+        ("Nexplanon 68mg implant", 85.00, 1),
+        ("Pneumococcal vaccine", 10.00, 1),
+        ("Denosumab 60mg/1ml injection", 183.00, 1)
+    ]
+    for name, price, pack in pa_items:
+        dmd_counter += 17
+        catalog.append({
+            "Drug_Name": name, "dmd_Code": str(dmd_counter),
+            "Tariff_Price": price, "Pack_Size": pack,
+            "Is_PA": 1, "Category": "PA"
+        })
+
+    return pd.DataFrame(catalog)
+
+def generate_dispensing_data(catalog_df, total_items=20000, month_year="2026-03"):
+    data = []
+    start_date = datetime.strptime(f"{month_year}-01", "%Y-%m-%d")
+    
+    # Create weighted probabilities (Generics 80%, Branded 12%, PA 8%)
+    weights = []
+    for _, row in catalog_df.iterrows():
+        if row["Category"] == "Generic": weights.append(80 / 72) 
+        elif row["Category"] == "Branded": weights.append(12 / 7)
+        else: weights.append(8 / 7)
+    
+    weights = np.array(weights) / sum(weights)
+    
+    for _ in range(total_items):
+        drug = catalog_df.sample(n=1, weights=weights).iloc[0]
         
-    disp_list.append({
-        'dispense_date': '2026-04-15',
-        'drug_description': drug[0],
-        'dm_d_code': drug[1],
-        'bnf_code': drug[2],
-        'quantity_dispensed': random.randint(1, 2),
-        'pack_size': drug[3],
-        'form': 'TAB' if 'tablet' in drug[0].lower() else 'CAP',
-        'pa_flag': 'N'
-    })
-pd.DataFrame(disp_list).to_csv("mock_dispensing_5000.csv", index=False)
+        # Simulate PA Flagging errors (15% of PA items are missed by staff)
+        pa_flag = drug["Is_PA"]
+        if pa_flag == 1 and random.random() < 0.15:
+            pa_flag = 0 
+            
+        dispense_date = start_date + timedelta(days=random.randint(0, 30))
+        
+        data.append({
+            "Dispense_Date": dispense_date.strftime("%Y-%m-%d"),
+            "dmd_Code": drug["dmd_Code"],
+            "Drug_Name": drug["Drug_Name"],
+            "Quantity_Dispensed": drug["Pack_Size"],
+            "Reimbursement_Price": drug["Tariff_Price"],
+            "PA_Flag": pa_flag,
+            "Category": drug["Category"]
+        })
+        
+    return pd.DataFrame(data).sort_values("Dispense_Date")
 
-# 2. Generate Invoice File
-inv_list = []
-for drug in DRUG_LIBRARY:
-    tariff_gbp = drug[4] / 100
-    # Branded items MUST have zero discount to trigger clawback losses in the engine
-    unit_cost = tariff_gbp if drug[5] else tariff_gbp * random.uniform(0.72, 0.88)
+def generate_invoice_data(dispensing_df, catalog_df, month_year="2026-03"):
+    invoices = []
+    start_date = datetime.strptime(f"{month_year}-01", "%Y-%m-%d")
+    suppliers = ["AAH Pharmaceuticals", "Alliance Healthcare", "Phoenix Healthcare"]
     
-    inv_list.append({
-        'invoice_date': '2026-04-10',
-        'dm_d_code': drug[1],
-        'supplier_name': "AAH",
-        'supplier_description': drug[0],
-        'unit_cost_gbp': round(unit_cost, 2),
-        'pack_size': drug[3],
-        'invoice_pack_size': drug[3],
-        'min_unit_cost': round(unit_cost * 0.95, 2),
-        'avg_unit_cost': round(unit_cost, 2)
-    })
-pd.DataFrame(inv_list).to_csv("mock_invoices_5000.csv", index=False)
+    # Aggregate dispensed volumes to create realistic purchase orders
+    volume_summary = dispensing_df.groupby("dmd_Code")["Quantity_Dispensed"].sum().reset_index()
+    
+    invoice_id = 10000
+    for _, row in volume_summary.iterrows():
+        drug = catalog_df[catalog_df["dmd_Code"] == row["dmd_Code"]].iloc[0]
+        
+        # Calculate total packs needed, add random 5% buffer for stock holding
+        total_quantity_needed = row["Quantity_Dispensed"]
+        total_packs_needed = int(np.ceil((total_quantity_needed / drug["Pack_Size"]) * 1.05))
+        
+        # Split into 1 to 4 deliveries across the month
+        deliveries = random.randint(1, 4)
+        packs_per_delivery = max(1, total_packs_needed // deliveries)
+        
+        for _ in range(deliveries):
+            supplier = random.choice(suppliers)
+            invoice_id += random.randint(1, 5)
+            inv_date = start_date + timedelta(days=random.randint(0, 30))
+            
+            # Simulate Procurement Waste: 20% of the time, they buy generics at a loss
+            if drug["Category"] == "Generic" and random.random() < 0.20:
+                unit_price = round(drug["Tariff_Price"] * random.uniform(1.05, 1.20), 2)
+            else:
+                # Standard wholesale discount (8% to 15% off tariff)
+                unit_price = round(drug["Tariff_Price"] * random.uniform(0.85, 0.92), 2)
+            
+            invoices.append({
+                "Invoice_Date": inv_date.strftime("%Y-%m-%d"),
+                "Invoice_Number": f"INV-{invoice_id}",
+                "Supplier": supplier,
+                "dmd_Code": drug["dmd_Code"],
+                "Drug_Name": drug["Drug_Name"],
+                "Pack_Size": drug["Pack_Size"],
+                "Packs_Purchased": packs_per_delivery,
+                "Unit_Price_Paid": unit_price,
+                "Total_Net_Cost": round(unit_price * packs_per_delivery, 2)
+            })
+            
+    return pd.DataFrame(invoices).sort_values("Invoice_Date")
 
-# 3. Generate Tariff File
-tariff_list = []
-for drug in DRUG_LIBRARY:
-    tariff_list.append({
-        'dm_d_code': drug[1],
-        'tariff_drug': drug[0],
-        'tariff_price_gbp': drug[4] / 100,
-        'tariff_pack_size': drug[3],
-        'tariff_form': 'TAB' if 'tablet' in drug[0].lower() else 'CAP'
-    })
-pd.DataFrame(tariff_list).to_csv("Part VIIIA April 2026.csv", index=False)
+if __name__ == "__main__":
+    print("Building Drug Catalogue...")
+    catalog = build_drug_catalog()
+    
+    print("Generating 20,000 Dispensing Records...")
+    dispensing_df = generate_dispensing_data(catalog, total_items=20000)
+    
+    print("Reverse-engineering Wholesaler Invoices...")
+    invoice_df = generate_invoice_data(dispensing_df, catalog)
+    
+    dispensing_df.to_csv("mock_dispensing_20k.csv", index=False)
+    invoice_df.to_csv("mock_invoices_20k.csv", index=False)
+    
+    print("\nSuccess! Files created:")
+    print(f"- mock_dispensing_20k.csv ({len(dispensing_df)} rows)")
+    print(f"- mock_invoices_20k.csv ({len(invoice_df)} rows)")
