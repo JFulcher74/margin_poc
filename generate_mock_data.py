@@ -3,124 +3,88 @@ import numpy as np
 import random
 from datetime import datetime, timedelta
 
-def build_drug_catalog():
-    """Generates a realistic catalogue of ~145 UK Primary Care Drugs."""
-    catalog = []
-    
-    # Standard Generics (Base Name, Base Price)
-    generics = [
-        ("Atorvastatin", 1.05), ("Omeprazole", 0.90), ("Amlodipine", 0.85),
-        ("Ramipril", 1.20), ("Metformin", 1.50), ("Levothyroxine", 0.95),
-        ("Bisoprolol", 1.10), ("Sertraline", 1.30), ("Lansoprazole", 1.15),
-        ("Losartan", 1.40), ("Citalopram", 1.25), ("Simvastatin", 0.90),
-        ("Clopidogrel", 1.45), ("Fluoxetine", 1.15), ("Naproxen", 1.80),
-        ("Pregabalin", 2.10), ("Gabapentin", 2.20), ("Amitriptyline", 1.05)
+def generate_targeted_poc_data():
+    catalog = [
+        # Clinical Switches (Triggers £6k target)
+        {"dm_d_code": "17603511000001107", "desc": "Esomeprazole 20mg gastro-resistant capsules", "pack": 28, "tariff": 2.21, "pa": 0, "weight": 60},
+        {"dm_d_code": "28572511000001104", "desc": "Rivaroxaban 20mg tablets", "pack": 28, "tariff": 36.00, "pa": 0, "weight": 120},
+        {"dm_d_code": "8058211000001101", "desc": "Lipitor 20mg tablets", "pack": 28, "tariff": 12.00, "pa": 0, "weight": 40},
+
+        # Concessions
+        {"dm_d_code": "28246311000001109", "desc": "Aripiprazole 10mg tablets", "pack": 28, "tariff": 1.50, "pa": 0, "weight": 50},
+        {"dm_d_code": "14188111000001100", "desc": "Felodipine 5mg modified-release tablets", "pack": 28, "tariff": 0.95, "pa": 0, "weight": 50},
+
+        # Personally Administered (Triggers £4k VAT loss)
+        {"dm_d_code": "1411111000001103", "desc": "Zoladex 10.8mg implant", "pack": 1, "tariff": 235.00, "pa": 1, "weight": 15},
+        {"dm_d_code": "10862711000001106", "desc": "Depo-Provera 150mg/1ml injection", "pack": 1, "tariff": 6.50, "pa": 1, "weight": 50},
+        {"dm_d_code": "3371911000001104", "desc": "Nexplanon 68mg implant", "pack": 1, "tariff": 85.00, "pa": 1, "weight": 20},
+        {"dm_d_code": "20534211000001109", "desc": "Denosumab 60mg/1ml solution for injection pre-filled syringes", "pack": 1, "tariff": 183.00, "pa": 1, "weight": 15},
+
+        # High Volume UK Generics
+        {"dm_d_code": "1271511000001104", "desc": "Atorvastatin 20mg tablets", "pack": 28, "tariff": 0.61, "pa": 0, "weight": 400},
+        {"dm_d_code": "995011000001102", "desc": "Amlodipine 5mg tablets", "pack": 28, "tariff": 0.55, "pa": 0, "weight": 350},
+        {"dm_d_code": "1057211000001103", "desc": "Omeprazole 20mg gastro-resistant capsules", "pack": 28, "tariff": 0.60, "pa": 0, "weight": 300},
+        {"dm_d_code": "1199511000001105", "desc": "Levothyroxine sodium 50microgram tablets", "pack": 28, "tariff": 0.65, "pa": 0, "weight": 250},
+        {"dm_d_code": "5011011000001107", "desc": "Ramipril 5mg capsules", "pack": 28, "tariff": 0.74, "pa": 0, "weight": 200},
+        {"dm_d_code": "1320811000001101", "desc": "Metformin 500mg tablets", "pack": 28, "tariff": 0.55, "pa": 0, "weight": 200},
+        {"dm_d_code": "1064711000001107", "desc": "Paracetamol 500mg tablets", "pack": 32, "tariff": 0.61, "pa": 0, "weight": 150},
+        {"dm_d_code": "1111111000001101", "desc": "Sertraline 50mg tablets", "pack": 28, "tariff": 1.20, "pa": 0, "weight": 150}
     ]
+
+    total_items = 20000
+    start_date = datetime.strptime("2026-03-01", "%Y-%m-%d")
     
-    # Expand generics by dosage
-    dmd_counter = 3970001100000000
-    for name, price in generics:
-        for dose, multiplier in [("10mg", 1.0), ("20mg", 1.2), ("40mg", 1.8), ("80mg", 2.5)]:
-            dmd_counter += 17
-            catalog.append({
-                "Drug_Name": f"{name} {dose} tablets",
-                "dmd_Code": str(dmd_counter),
-                "Tariff_Price": round(price * multiplier, 2),
-                "Pack_Size": 28,
-                "Is_PA": 0,
-                "Category": "Generic"
-            })
-
-    # High Cost & Branded Items
-    speciality = [
-        ("Apixaban 5mg tablets", 26.50, 56),
-        ("Rivaroxaban 20mg tablets", 36.00, 28),
-        ("Edoxaban 60mg tablets", 40.00, 28),
-        ("Fostair 100/6 dose inhaler", 29.32, 1),
-        ("Symbicort 200/6 Turbohaler", 38.00, 1),
-        ("Captopril 50mg tablets", 38.50, 56), # Volatile Concession
-        ("Domperidone 1mg/ml suspension", 92.00, 1) # Volatile Concession
-    ]
-    for name, price, pack in speciality:
-        dmd_counter += 17
-        catalog.append({
-            "Drug_Name": name, "dmd_Code": str(dmd_counter),
-            "Tariff_Price": price, "Pack_Size": pack,
-            "Is_PA": 0, "Category": "Branded"
-        })
-
-    # Personally Administered (PA) Items
-    pa_items = [
-        ("Hydroxocobalamin 1mg/1ml injection", 12.50, 1), # B12
-        ("Zoladex 10.8mg implant", 235.00, 1),
-        ("Zoladex 3.6mg implant", 70.00, 1),
-        ("Depo-Provera 150mg/1ml injection", 6.50, 1),
-        ("Nexplanon 68mg implant", 85.00, 1),
-        ("Pneumococcal vaccine", 10.00, 1),
-        ("Denosumab 60mg/1ml injection", 183.00, 1)
-    ]
-    for name, price, pack in pa_items:
-        dmd_counter += 17
-        catalog.append({
-            "Drug_Name": name, "dmd_Code": str(dmd_counter),
-            "Tariff_Price": price, "Pack_Size": pack,
-            "Is_PA": 1, "Category": "PA"
-        })
-
-    return pd.DataFrame(catalog)
-
-def generate_dispensing_data(catalog_df, total_items=20000, month_year="2026-03"):
-    data = []
-    start_date = datetime.strptime(f"{month_year}-01", "%Y-%m-%d")
+    weights = np.array([item["weight"] for item in catalog])
+    weights = weights / weights.sum()
     
-    # Create weighted probabilities (Generics 80%, Branded 12%, PA 8%)
-    weights = []
-    for _, row in catalog_df.iterrows():
-        if row["Category"] == "Generic": weights.append(80 / 72) 
-        elif row["Category"] == "Branded": weights.append(12 / 7)
-        else: weights.append(8 / 7)
+    dispensing_data = []
     
-    weights = np.array(weights) / sum(weights)
+    target_vat_loss = 4000
+    accumulated_vat_loss = 0
     
     for _ in range(total_items):
-        drug = catalog_df.sample(n=1, weights=weights).iloc[0]
+        drug = np.random.choice(catalog, p=weights)
         
-        # Simulate PA Flagging errors (15% of PA items are missed by staff)
-        pa_flag = drug["Is_PA"]
-        if pa_flag == 1 and random.random() < 0.15:
-            pa_flag = 0 
+        # CORRECTED PA FLAG LOGIC
+        pa_flag = "N"
+        if drug["pa"] == 1:
+            pa_flag = "Y"
+            vat_value = drug["tariff"] * 0.20
+            # Force VAT errors until we hit the £4k target
+            if accumulated_vat_loss < target_vat_loss and random.random() < 0.60:
+                pa_flag = "N"
+                accumulated_vat_loss += vat_value
             
         dispense_date = start_date + timedelta(days=random.randint(0, 30))
-        
-        data.append({
-            "Dispense_Date": dispense_date.strftime("%Y-%m-%d"),
-            "dmd_Code": drug["dmd_Code"],
-            "Drug_Name": drug["Drug_Name"],
-            "Quantity_Dispensed": drug["Pack_Size"],
-            "Reimbursement_Price": drug["Tariff_Price"],
-            "PA_Flag": pa_flag,
-            "Category": drug["Category"]
+        dispensing_data.append({
+            "dispense_date": dispense_date.strftime("%Y-%m-%d"),
+            "dm_d_code": drug["dm_d_code"],
+            "drug_description": drug["desc"],
+            "pack_size": drug["pack"],
+            "quantity_dispensed": 1, 
+            "pa_flag": pa_flag
         })
         
-    return pd.DataFrame(data).sort_values("Dispense_Date")
-
-def generate_invoice_data(dispensing_df, catalog_df, month_year="2026-03"):
+    disp_df = pd.DataFrame(dispensing_data).sort_values("dispense_date")
+    
     invoices = []
-    start_date = datetime.strptime(f"{month_year}-01", "%Y-%m-%d")
     suppliers = ["AAH Pharmaceuticals", "Alliance Healthcare", "Phoenix Healthcare"]
+    volume_summary = disp_df.groupby("dm_d_code")["quantity_dispensed"].sum().reset_index()
     
-    # Aggregate dispensed volumes to create realistic purchase orders
-    volume_summary = dispensing_df.groupby("dmd_Code")["Quantity_Dispensed"].sum().reset_index()
-    
+    target_waste = 8000
+    accumulated_waste = 0
     invoice_id = 10000
+    
     for _, row in volume_summary.iterrows():
-        drug = catalog_df[catalog_df["dmd_Code"] == row["dmd_Code"]].iloc[0]
+        drug = next(item for item in catalog if item["dm_d_code"] == row["dm_d_code"])
+        total_packs_needed = int(np.ceil(row["quantity_dispensed"] * 1.05))
         
-        # Calculate total packs needed, add random 5% buffer for stock holding
-        total_quantity_needed = row["Quantity_Dispensed"]
-        total_packs_needed = int(np.ceil((total_quantity_needed / drug["Pack_Size"]) * 1.05))
+        # Calculate optimal baseline cost to guarantee the overall practice gross profit
+        income = drug["tariff"] - (drug["tariff"] * 0.1118) + 2.19
+        optimal_cost = income - 4.00
+        if optimal_cost < (drug["tariff"] * 0.40):
+            optimal_cost = drug["tariff"] * 0.40
         
-        # Split into 1 to 4 deliveries across the month
         deliveries = random.randint(1, 4)
         packs_per_delivery = max(1, total_packs_needed // deliveries)
         
@@ -129,40 +93,30 @@ def generate_invoice_data(dispensing_df, catalog_df, month_year="2026-03"):
             invoice_id += random.randint(1, 5)
             inv_date = start_date + timedelta(days=random.randint(0, 30))
             
-            # Simulate Procurement Waste: 20% of the time, they buy generics at a loss
-            if drug["Category"] == "Generic" and random.random() < 0.20:
-                unit_price = round(drug["Tariff_Price"] * random.uniform(1.05, 1.20), 2)
-            else:
-                # Standard wholesale discount (8% to 15% off tariff)
-                unit_price = round(drug["Tariff_Price"] * random.uniform(0.85, 0.92), 2)
+            unit_price = optimal_cost
             
+            # Force procurement waste until we hit the £8k target
+            if drug["pa"] == 0 and accumulated_waste < target_waste and random.random() < 0.35:
+                surcharge = random.uniform(0.50, 3.00)
+                unit_price = drug["tariff"] + surcharge
+                waste_generated = (unit_price - optimal_cost) * packs_per_delivery
+                accumulated_waste += waste_generated
+
             invoices.append({
-                "Invoice_Date": inv_date.strftime("%Y-%m-%d"),
-                "Invoice_Number": f"INV-{invoice_id}",
-                "Supplier": supplier,
-                "dmd_Code": drug["dmd_Code"],
-                "Drug_Name": drug["Drug_Name"],
-                "Pack_Size": drug["Pack_Size"],
-                "Packs_Purchased": packs_per_delivery,
-                "Unit_Price_Paid": unit_price,
-                "Total_Net_Cost": round(unit_price * packs_per_delivery, 2)
+                "invoice_date": inv_date.strftime("%Y-%m-%d"),
+                "invoice_number": f"INV-{invoice_id}",
+                "supplier_name": supplier,
+                "dm_d_code": drug["dm_d_code"],
+                "supplier_description": drug["desc"],
+                "pack_size": drug["pack"],
+                "packs_purchased": packs_per_delivery,
+                "unit_cost_gbp": round(unit_price, 2)
             })
             
-    return pd.DataFrame(invoices).sort_values("Invoice_Date")
+    inv_df = pd.DataFrame(invoices).sort_values("invoice_date")
+    
+    disp_df.to_csv("mock_dispensing_20k.csv", index=False)
+    inv_df.to_csv("mock_invoices_20k.csv", index=False)
 
 if __name__ == "__main__":
-    print("Building Drug Catalogue...")
-    catalog = build_drug_catalog()
-    
-    print("Generating 20,000 Dispensing Records...")
-    dispensing_df = generate_dispensing_data(catalog, total_items=20000)
-    
-    print("Reverse-engineering Wholesaler Invoices...")
-    invoice_df = generate_invoice_data(dispensing_df, catalog)
-    
-    dispensing_df.to_csv("mock_dispensing_20k.csv", index=False)
-    invoice_df.to_csv("mock_invoices_20k.csv", index=False)
-    
-    print("\nSuccess! Files created:")
-    print(f"- mock_dispensing_20k.csv ({len(dispensing_df)} rows)")
-    print(f"- mock_invoices_20k.csv ({len(invoice_df)} rows)")
+    generate_targeted_poc_data()
