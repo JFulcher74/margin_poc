@@ -98,10 +98,10 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['bnf_chapter_code'] = df['bnf_code'].str[:2]
     df['therapeutic_group'] = df['bnf_chapter_code'].map(BNF_MAPPING).fillna('Unclassified / Other')
     
-    df['total_units_dispensed'] = df['pack_size'] * df['quantity_dispensed']
+    df['total_units_dispensed'] = df['quantity_dispensed']
     
-    df['actual_cost_per_unit'] = df['avg_unit_cost'] / df['invoice_pack_size']
-    df['best_cost_per_unit'] = df['min_unit_cost'] / df['invoice_pack_size']
+    df['actual_cost_per_unit'] = df['avg_unit_cost'] / df['invoice_pack_size'].replace(0, 1)
+    df['best_cost_per_unit'] = df['min_unit_cost'] / df['invoice_pack_size'].replace(0, 1)
     df['acquisition_cost_gbp'] = df['total_units_dispensed'] * df['actual_cost_per_unit']
     df['benchmark_cost_gbp'] = df['total_units_dispensed'] * df['best_cost_per_unit']
     df['acquisition_cost_gbp'] = df['acquisition_cost_gbp'].fillna(0.0)
@@ -119,7 +119,15 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['effective_dm_d_code'] = np.where(df['dm_d_code'].replace('', pd.NA).notna(), df['dm_d_code'], df['matched_dm_d_code'])
     df = df.merge(tariff_df, left_on=['effective_dm_d_code', 'form'], right_on=['dm_d_code', 'tariff_form'], how='left', suffixes=('', '_tariff'))
     
-    # NEW FIX: Only apply MDS math if the dashboard toggle is explicitly set to True
+    # Fallback for non-Part VIIIA items (ONS / Branded Inhalers) missing from the mock CSV
+    NON_TARIFF_PRICES = {
+        '33946211000001103': 2.55, 
+        '31969611000001107': 19.50
+    }
+    df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(df['effective_dm_d_code'].map(NON_TARIFF_PRICES))
+    df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(df['avg_unit_cost'])
+    df['tariff_pack_size'] = df['tariff_pack_size'].fillna(df['invoice_pack_size']).replace(0, 1)
+
     if mds_active:
         df['mds_pct'] = df['effective_dm_d_code'].map(MDS_MAPPING).fillna(0.0)
     else:
@@ -131,7 +139,6 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     df['net_acquisition_cost_gbp'] = df['acquisition_cost_gbp'] - df['total_rebates_gbp']
     
     df['concession_price_gbp'] = df['effective_dm_d_code'].map(CONCESSIONS_MAPPING).fillna(0.0)
-    df['tariff_price_gbp'] = df['tariff_price_gbp'].fillna(0.0)
     df['final_reimbursement_price_gbp'] = np.maximum(df['tariff_price_gbp'], df['concession_price_gbp'])
     df['concession_uplift_gbp'] = np.where(df['concession_price_gbp'] > df['tariff_price_gbp'], ((df['concession_price_gbp'] - df['tariff_price_gbp']) / df['tariff_pack_size']) * df['total_units_dispensed'], 0.0)
     
@@ -157,7 +164,8 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     total_prescriptions = len(df)
     dynamic_fee = get_dispensing_fee(total_prescriptions)
     
-    df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', 0.0, dynamic_fee)
+    standard_pa_fee = 1.26
+    df['dispensing_fee_gbp'] = np.where(df['pa_flag'] == 'Y', standard_pa_fee, dynamic_fee)
     df['vat_allowance_gbp'] = np.where(df['pa_flag'] == 'Y', df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
     df['lost_vat_gbp'] = np.where(df['missed_pa_claim'], df['net_drug_reimbursed_gbp'] * 0.20, 0.0)
     
@@ -176,11 +184,13 @@ def calculate_metrics(df: pd.DataFrame, tariff_df: pd.DataFrame, dnd_df: pd.Data
     
     df['est_generic_net_cost'] = df['est_generic_cost'] * (1 - (df['rebate_pct'] / 100.0))
     
-    est_generic_clawback = df['est_generic_reimb'] * df['quantity_dispensed'] * dynamic_rate
-    est_generic_net_reimb = (df['est_generic_reimb'] * df['quantity_dispensed']) - est_generic_clawback
+    df['fractional_packs_dispensed'] = df['quantity_dispensed'] / df['tariff_pack_size'].replace(0, 1)
+    
+    est_generic_clawback = df['est_generic_reimb'] * df['fractional_packs_dispensed'] * dynamic_rate
+    est_generic_net_reimb = (df['est_generic_reimb'] * df['fractional_packs_dispensed']) - est_generic_clawback
     est_generic_income = est_generic_net_reimb + df['dispensing_fee_gbp'] 
     
-    est_generic_total_cost = df['est_generic_net_cost'] * df['quantity_dispensed']
+    est_generic_total_cost = df['est_generic_net_cost'] * df['fractional_packs_dispensed']
     df['est_generic_margin'] = est_generic_income - est_generic_total_cost
     
     df['potential_savings_gbp'] = np.where(df['switch_type'] != 'None', df['est_generic_margin'] - df['margin_gbp'], 0.0)
